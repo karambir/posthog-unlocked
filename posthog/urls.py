@@ -123,6 +123,7 @@ urlpatterns = [
     opt_slash_path("_health", health),
     opt_slash_path("_stats", stats),
     opt_slash_path("_preflight", preflight_check),
+    #
     # ee
     *ee_urlpatterns,
     # admin
@@ -133,8 +134,8 @@ urlpatterns = [
     opt_slash_path("api/user/redirect_to_site", user.redirect_to_site),
     opt_slash_path("api/user/test_slack_webhook", user.test_slack_webhook),
     opt_slash_path("api/prompts/webhook", prompt_webhook),
-    opt_slash_path("api/signup", signup.SignupViewset.as_view()),
-    opt_slash_path("api/social_signup", signup.SocialSignupViewset.as_view()),
+    # opt_slash_path("api/signup", signup.SignupViewset.as_view()),
+    # opt_slash_path("api/social_signup", signup.SocialSignupViewset.as_view()),
     path("api/signup/<str:invite_id>/", signup.InviteSignupViewset.as_view()),
     path(
         "api/reset/<str:user_uuid>/",

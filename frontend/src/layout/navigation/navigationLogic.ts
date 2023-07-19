@@ -222,22 +222,6 @@ export const navigationLogic = kea<navigationLogicType>({
             null as string | null,
             {
                 loadLatestVersion: async () => {
-                    const versions = (await api.get('https://update.posthog.com')) as VersionType[]
-                    for (const version of versions) {
-                        if (
-                            version?.release_date &&
-                            dayjs
-                                .utc(version.release_date)
-                                .set('hour', 0)
-                                .set('minute', 0)
-                                .set('second', 0)
-                                .set('millisecond', 0) > dayjs()
-                        ) {
-                            // Release date is in the future
-                            continue
-                        }
-                        return version.version
-                    }
                     return null
                 },
             },

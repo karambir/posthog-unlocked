@@ -101,7 +101,7 @@ ENV PATH=/python-runtime/bin:$PATH \
 # Add in Django deps and generate Django's static files.
 COPY manage.py manage.py
 COPY posthog posthog/
-COPY ee ee/
+# COPY ee ee/
 COPY --from=frontend-build /code/frontend/dist /code/frontend/dist
 RUN SKIP_SERVICE_VERSION_REQUIREMENTS=1 SECRET_KEY='unsafe secret key for collectstatic only' DATABASE_URL='postgres:///' REDIS_URL='redis:///' python manage.py collectstatic --noinput
 
@@ -184,7 +184,7 @@ COPY --chown=posthog:posthog gunicorn.config.py ./
 COPY --chown=posthog:posthog ./bin ./bin/
 COPY --chown=posthog:posthog manage.py manage.py
 COPY --chown=posthog:posthog posthog posthog/
-COPY --chown=posthog:posthog ee ee/
+# COPY --chown=posthog:posthog ee ee/
 
 # Setup ENV.
 ENV NODE_ENV=production \

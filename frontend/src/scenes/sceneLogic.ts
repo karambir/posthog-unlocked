@@ -202,6 +202,7 @@ export const sceneLogic = kea<sceneLogicType>({
             } else {
                 featureAvailable = userLogic.values.hasAvailableFeature(featureKey)
             }
+            featureAvailable = true
             if (featureAvailable) {
                 featureAvailableCallback?.()
             } else {
