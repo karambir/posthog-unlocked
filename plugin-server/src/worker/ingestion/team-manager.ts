@@ -1,8 +1,8 @@
 import { Properties } from '@posthog/plugin-scaffold'
-import { StatsD } from 'hot-shots'
 import LRU from 'lru-cache'
 
 import { ONE_MINUTE } from '../../config/constants'
+import { TeamIDWithConfig } from '../../main/ingestion-queues/session-recording/session-recordings-consumer'
 import { PipelineEvent, PluginsServerConfig, Team, TeamId } from '../../types'
 import { PostgresRouter, PostgresUse } from '../../utils/db/postgres'
 import { timeoutGuard } from '../../utils/db/utils'
@@ -12,12 +12,10 @@ export class TeamManager {
     postgres: PostgresRouter
     teamCache: LRU<TeamId, Team | null>
     tokenToTeamIdCache: LRU<string, TeamId | null>
-    statsd?: StatsD
     instanceSiteUrl: string
 
-    constructor(postgres: PostgresRouter, serverConfig: PluginsServerConfig, statsd?: StatsD) {
+    constructor(postgres: PostgresRouter, serverConfig: PluginsServerConfig) {
         this.postgres = postgres
-        this.statsd = statsd
 
         this.teamCache = new LRU({
             max: 10_000,
@@ -192,11 +190,11 @@ export async function fetchTeamByToken(client: PostgresRouter, token: string): P
     return selectResult.rows[0] ?? null
 }
 
-export async function fetchTeamTokensWithRecordings(client: PostgresRouter): Promise<Record<string, TeamId>> {
-    const selectResult = await client.query<Pick<Team, 'id' | 'api_token'>>(
+export async function fetchTeamTokensWithRecordings(client: PostgresRouter): Promise<Record<string, TeamIDWithConfig>> {
+    const selectResult = await client.query<{ capture_console_log_opt_in: boolean } & Pick<Team, 'id' | 'api_token'>>(
         PostgresUse.COMMON_READ,
         `
-            SELECT id, api_token
+            SELECT id, api_token, capture_console_log_opt_in
             FROM posthog_team
             WHERE session_recording_opt_in = true
         `,
@@ -205,7 +203,7 @@ export async function fetchTeamTokensWithRecordings(client: PostgresRouter): Pro
     )
 
     return selectResult.rows.reduce((acc, row) => {
-        acc[row.api_token] = row.id
+        acc[row.api_token] = { teamId: row.id, consoleLogIngestionEnabled: row.capture_console_log_opt_in }
         return acc
-    }, {} as Record<string, TeamId>)
+    }, {} as Record<string, TeamIDWithConfig>)
 }

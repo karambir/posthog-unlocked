@@ -1,5 +1,6 @@
-import { EventType, IncrementalSource, eventWithTime } from '@rrweb/types'
+import { EventType, eventWithTime, IncrementalSource } from '@rrweb/types'
 import { Dayjs } from 'lib/dayjs'
+
 import { RecordingSegment, RecordingSnapshot } from '~/types'
 
 /**
@@ -24,7 +25,11 @@ const activeSources = [
 const ACTIVITY_THRESHOLD_MS = 5000
 
 const isActiveEvent = (event: eventWithTime): boolean => {
-    return event.type === EventType.IncrementalSnapshot && activeSources.includes(event.data?.source)
+    return (
+        event.type === EventType.FullSnapshot ||
+        event.type === EventType.Meta ||
+        (event.type === EventType.IncrementalSnapshot && activeSources.includes(event.data?.source))
+    )
 }
 
 export const mapSnapshotsToWindowId = (snapshots: RecordingSnapshot[]): Record<string, eventWithTime[]> => {
@@ -47,7 +52,10 @@ export const createSegments = (snapshots: RecordingSnapshot[], start?: Dayjs, en
     const snapshotsByWindowId = mapSnapshotsToWindowId(snapshots)
 
     snapshots.forEach((snapshot, index) => {
-        const eventIsActive = isActiveEvent(snapshot) || index === 0
+        const eventIsActive = isActiveEvent(snapshot)
+        const previousSnapshot = snapshots[index - 1]
+        const isPreviousSnapshotLastForWindow =
+            snapshotsByWindowId[previousSnapshot?.windowId]?.slice(-1)[0] === previousSnapshot
 
         // When do we create a new segment?
         // 1. If we don't have one yet
@@ -65,6 +73,11 @@ export const createSegments = (snapshots: RecordingSnapshot[], start?: Dayjs, en
 
         // 4. If windowId changes we create a new segment
         if (activeSegment?.windowId !== snapshot.windowId && eventIsActive) {
+            isNewSegment = true
+        }
+
+        // 5. If there are no more snapshots for this windowId
+        if (isPreviousSnapshotLastForWindow) {
             isNewSegment = true
         }
 

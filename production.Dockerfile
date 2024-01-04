@@ -26,15 +26,32 @@ WORKDIR /code
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 COPY package.json pnpm-lock.yaml ./
-RUN corepack enable && pnpm --version && \
+RUN corepack enable && \
     mkdir /tmp/pnpm-store && \
     pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store --prod && \
     rm -rf /tmp/pnpm-store
 
 COPY frontend/ frontend/
+# COPY ee/frontend/ ee/frontend/
 COPY ./bin/ ./bin/
 COPY babel.config.js tsconfig.json webpack.config.js ./
 RUN pnpm build
+
+
+#
+# ---------------------------------------------------------
+#
+FROM node:18.12.1-bullseye-slim AS plugin-transpiler-build
+WORKDIR /code
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+COPY plugin-transpiler/ plugin-transpiler/
+WORKDIR /code/plugin-transpiler
+RUN corepack enable && \
+    mkdir /tmp/pnpm-store && \
+    pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store && \
+    pnpm build && \
+    rm -rf /tmp/pnpm-store
 
 
 #
@@ -108,7 +125,7 @@ ENV PATH=/python-runtime/bin:$PATH \
 # Add in Django deps and generate Django's static files.
 COPY manage.py manage.py
 COPY posthog posthog/
-COPY ee ee/
+# COPY ee ee/
 COPY --from=frontend-build /code/frontend/dist /code/frontend/dist
 RUN SKIP_SERVICE_VERSION_REQUIREMENTS=1 SECRET_KEY='unsafe secret key for collectstatic only' DATABASE_URL='postgres:///' REDIS_URL='redis:///' python manage.py collectstatic --noinput
 
@@ -195,7 +212,7 @@ COPY --chown=posthog:posthog gunicorn.config.py ./
 COPY --chown=posthog:posthog ./bin ./bin/
 COPY --chown=posthog:posthog manage.py manage.py
 COPY --chown=posthog:posthog posthog posthog/
-COPY --chown=posthog:posthog ee ee/
+# COPY --chown=posthog:posthog ee ee/
 COPY --chown=posthog:posthog hogvm hogvm/
 
 # Setup ENV.

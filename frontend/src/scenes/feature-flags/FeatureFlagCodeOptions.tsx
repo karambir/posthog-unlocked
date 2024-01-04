@@ -1,19 +1,20 @@
 import { SDKKey } from '~/types'
+
 import {
-    UTM_TAGS,
-    FeatureFlagSnippet,
-    JSSnippet,
     AndroidSnippet,
-    iOSSnippet,
-    ReactNativeSnippet,
-    NodeJSSnippet,
-    PythonSnippet,
-    RubySnippet,
     APISnippet,
-    PHPSnippet,
+    FeatureFlagSnippet,
     GolangSnippet,
+    iOSSnippet,
     JSBootstrappingSnippet,
+    JSSnippet,
+    NodeJSSnippet,
+    PHPSnippet,
+    PythonSnippet,
+    ReactNativeSnippet,
     ReactSnippet,
+    RubySnippet,
+    UTM_TAGS,
 } from './FeatureFlagSnippets'
 
 const DOC_BASE_URL = 'https://posthog.com/docs/'
@@ -117,7 +118,16 @@ export const OPTIONS: InstructionOption[] = [
 
 export const LOCAL_EVALUATION_LIBRARIES: string[] = [SDKKey.NODE_JS, SDKKey.PYTHON, SDKKey.RUBY, SDKKey.PHP, SDKKey.GO]
 
-export const PAYLOAD_LIBRARIES: string[] = [SDKKey.JS_WEB, SDKKey.NODE_JS, SDKKey.PYTHON, SDKKey.RUBY, SDKKey.REACT]
+export const PAYLOAD_LIBRARIES: string[] = [
+    SDKKey.JS_WEB,
+    SDKKey.NODE_JS,
+    SDKKey.PYTHON,
+    SDKKey.RUBY,
+    SDKKey.REACT,
+    SDKKey.ANDROID,
+    SDKKey.REACT_NATIVE,
+    SDKKey.IOS,
+]
 
 export const BOOTSTRAPPING_OPTIONS: InstructionOption[] = [
     {

@@ -2,6 +2,7 @@ from posthog.hogql.metadata import get_hogql_metadata
 from posthog.models import PropertyDefinition, Cohort
 from posthog.schema import HogQLMetadata, HogQLMetadataResponse
 from posthog.test.base import APIBaseTest, ClickhouseTestMixin
+from django.test import override_settings
 
 
 class TestMetadata(ClickhouseTestMixin, APIBaseTest):
@@ -9,12 +10,14 @@ class TestMetadata(ClickhouseTestMixin, APIBaseTest):
 
     def _expr(self, query: str, table: str = "events") -> HogQLMetadataResponse:
         return get_hogql_metadata(
-            query=HogQLMetadata(kind="HogQLMetadata", expr=query, table=table, response=None), team=self.team
+            query=HogQLMetadata(kind="HogQLMetadata", expr=query, table=table, response=None),
+            team=self.team,
         )
 
     def _select(self, query: str) -> HogQLMetadataResponse:
         return get_hogql_metadata(
-            query=HogQLMetadata(kind="HogQLMetadata", select=query, response=None), team=self.team
+            query=HogQLMetadata(kind="HogQLMetadata", select=query, response=None),
+            team=self.team,
         )
 
     def test_metadata_valid_expr_select(self):
@@ -26,7 +29,14 @@ class TestMetadata(ClickhouseTestMixin, APIBaseTest):
                 "isValid": False,
                 "inputExpr": "select 1",
                 "inputSelect": None,
-                "errors": [{"message": "extraneous input '1' expecting <EOF>", "start": 7, "end": 8, "fix": None}],
+                "errors": [
+                    {
+                        "message": "extraneous input '1' expecting <EOF>",
+                        "start": 7,
+                        "end": 8,
+                        "fix": None,
+                    }
+                ],
             },
         )
 
@@ -64,7 +74,7 @@ class TestMetadata(ClickhouseTestMixin, APIBaseTest):
                 "inputSelect": "timestamp",
                 "errors": [
                     {
-                        "message": "mismatched input 'timestamp' expecting {SELECT, WITH, '('}",
+                        "message": "mismatched input 'timestamp' expecting {SELECT, WITH, '(', '<'}",
                         "start": 0,
                         "end": 9,
                         "fix": None,
@@ -126,6 +136,7 @@ class TestMetadata(ClickhouseTestMixin, APIBaseTest):
         metadata = self._expr("is_identified", "persons")
         self.assertEqual(metadata.isValid, True)
 
+    @override_settings(PERSON_ON_EVENTS_OVERRIDE=True, PERSON_ON_EVENTS_V2_OVERRIDE=False)
     def test_metadata_in_cohort(self):
         cohort = Cohort.objects.create(team=self.team, name="cohort_name")
         query = (
@@ -133,8 +144,8 @@ class TestMetadata(ClickhouseTestMixin, APIBaseTest):
         )
         metadata = self._select(query)
         self.assertEqual(
-            metadata.dict(),
-            metadata.dict()
+            metadata.model_dump(),
+            metadata.model_dump()
             | {
                 "isValid": True,
                 "inputExpr": None,

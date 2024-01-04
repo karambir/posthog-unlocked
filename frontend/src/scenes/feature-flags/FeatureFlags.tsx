@@ -1,35 +1,39 @@
+import { LemonInput, LemonSelect, LemonTag } from '@posthog/lemon-ui'
 import { useActions, useValues } from 'kea'
-import { featureFlagsLogic, FeatureFlagsTab } from './featureFlagsLogic'
-import { Link } from 'lib/lemon-ui/Link'
-import { copyToClipboard, deleteWithUndo } from 'lib/utils'
-import { PageHeader } from 'lib/components/PageHeader'
-import { AnyPropertyFilter, AvailableFeature, FeatureFlagFilters, FeatureFlagType, ProductKey } from '~/types'
-import { normalizeColumnTitle } from 'lib/components/Table/utils'
-import { urls } from 'scenes/urls'
-import stringWithWBR from 'lib/utils/stringWithWBR'
-import { teamLogic } from '../teamLogic'
-import { SceneExport } from 'scenes/sceneTypes'
-import { LemonButton } from 'lib/lemon-ui/LemonButton'
-import { LemonDivider } from 'lib/lemon-ui/LemonDivider'
-import { LemonTable, LemonTableColumn, LemonTableColumns } from 'lib/lemon-ui/LemonTable'
-import { More } from 'lib/lemon-ui/LemonButton/More'
-import { createdAtColumn, createdByColumn } from 'lib/lemon-ui/LemonTable/columnUtils'
-import PropertyFiltersDisplay from 'lib/components/PropertyFilters/components/PropertyFiltersDisplay'
+import { router } from 'kea-router'
 import { ActivityLog } from 'lib/components/ActivityLog/ActivityLog'
 import { ActivityScope } from 'lib/components/ActivityLog/humanizeActivity'
-import { LemonInput, LemonSelect, LemonTag } from '@posthog/lemon-ui'
-import { Tooltip } from 'lib/lemon-ui/Tooltip'
-import { IconLock } from 'lib/lemon-ui/icons'
-import { router } from 'kea-router'
-import { ObjectTags } from 'lib/components/ObjectTags/ObjectTags'
-import { userLogic } from 'scenes/userLogic'
-import { LemonTabs } from 'lib/lemon-ui/LemonTabs'
-import { ProductIntroduction } from 'lib/components/ProductIntroduction/ProductIntroduction'
-import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
-import { FEATURE_FLAGS } from 'lib/constants'
 import { FeatureFlagHog } from 'lib/components/hedgehogs'
-import { Noun, groupsModel } from '~/models/groupsModel'
+import { MemberSelect } from 'lib/components/MemberSelect'
+import { ObjectTags } from 'lib/components/ObjectTags/ObjectTags'
+import { PageHeader } from 'lib/components/PageHeader'
+import { ProductIntroduction } from 'lib/components/ProductIntroduction/ProductIntroduction'
+import PropertyFiltersDisplay from 'lib/components/PropertyFilters/components/PropertyFiltersDisplay'
+import { normalizeColumnTitle } from 'lib/components/Table/utils'
+import { FEATURE_FLAGS } from 'lib/constants'
+import { IconLock } from 'lib/lemon-ui/icons'
+import { LemonButton } from 'lib/lemon-ui/LemonButton'
+import { More } from 'lib/lemon-ui/LemonButton/More'
+import { LemonDivider } from 'lib/lemon-ui/LemonDivider'
 import { LemonMarkdown } from 'lib/lemon-ui/LemonMarkdown'
+import { LemonTable, LemonTableColumn, LemonTableColumns } from 'lib/lemon-ui/LemonTable'
+import { createdAtColumn, createdByColumn } from 'lib/lemon-ui/LemonTable/columnUtils'
+import { LemonTabs } from 'lib/lemon-ui/LemonTabs'
+import { Link } from 'lib/lemon-ui/Link'
+import { Tooltip } from 'lib/lemon-ui/Tooltip'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { copyToClipboard } from 'lib/utils/copyToClipboard'
+import { deleteWithUndo } from 'lib/utils/deleteWithUndo'
+import stringWithWBR from 'lib/utils/stringWithWBR'
+import { SceneExport } from 'scenes/sceneTypes'
+import { urls } from 'scenes/urls'
+import { userLogic } from 'scenes/userLogic'
+
+import { groupsModel, Noun } from '~/models/groupsModel'
+import { AnyPropertyFilter, AvailableFeature, FeatureFlagFilters, FeatureFlagType, ProductKey } from '~/types'
+
+import { teamLogic } from '../teamLogic'
+import { featureFlagsLogic, FeatureFlagsTab } from './featureFlagsLogic'
 
 export const scene: SceneExport = {
     component: FeatureFlags,
@@ -49,7 +53,7 @@ export function OverViewTab({
     const { aggregationLabel } = useValues(groupsModel)
 
     const flagLogic = featureFlagsLogic({ flagPrefix })
-    const { featureFlagsLoading, searchedFeatureFlags, searchTerm, uniqueCreators, filters, shouldShowEmptyState } =
+    const { featureFlagsLoading, searchedFeatureFlags, searchTerm, filters, shouldShowEmptyState } =
         useValues(flagLogic)
     const { updateFeatureFlag, loadFeatureFlags, setSearchTerm, setFeatureFlagsFilters } = useActions(flagLogic)
     const { user, hasAvailableFeature } = useValues(userLogic)
@@ -158,8 +162,8 @@ export function OverViewTab({
                             <>
                                 <LemonButton
                                     status="stealth"
-                                    onClick={async () => {
-                                        await copyToClipboard(featureFlag.key, 'feature flag key')
+                                    onClick={() => {
+                                        void copyToClipboard(featureFlag.key, 'feature flag key')
                                     }}
                                     fullWidth
                                 >
@@ -210,13 +214,21 @@ export function OverViewTab({
                                     <LemonButton
                                         status="danger"
                                         onClick={() => {
-                                            deleteWithUndo({
+                                            void deleteWithUndo({
                                                 endpoint: `projects/${currentTeamId}/feature_flags`,
                                                 object: { name: featureFlag.key, id: featureFlag.id },
                                                 callback: loadFeatureFlags,
                                             })
                                         }}
-                                        disabled={!featureFlag.can_edit}
+                                        disabledReason={
+                                            !featureFlag.can_edit
+                                                ? "You have only 'View' access for this feature flag. To make changes, please contact the flag's creator."
+                                                : (featureFlag.features?.length || 0) > 0
+                                                ? 'This feature flag is in use with an early access feature. Delete the early access feature to delete this flag'
+                                                : (featureFlag.experiment_set?.length || 0) > 0
+                                                ? 'This feature flag is linked to an experiment. Delete the experiment to delete this flag'
+                                                : null
+                                        }
                                         fullWidth
                                     >
                                         Delete feature flag
@@ -247,8 +259,9 @@ export function OverViewTab({
             {!shouldShowEmptyState && (
                 <>
                     <div>
-                        <div className="flex justify-between mb-4">
+                        <div className="flex justify-between mb-4 gap-2 flex-wrap">
                             <LemonInput
+                                className="w-60"
                                 type="search"
                                 placeholder={searchPlaceholder || ''}
                                 onChange={setSearchTerm}
@@ -261,6 +274,8 @@ export function OverViewTab({
                                             <b>Type</b>
                                         </span>
                                         <LemonSelect
+                                            dropdownMatchSelectWidth={false}
+                                            size="small"
                                             onChange={(type) => {
                                                 if (type) {
                                                     if (type === 'all') {
@@ -287,6 +302,8 @@ export function OverViewTab({
                                     <b>Status</b>
                                 </span>
                                 <LemonSelect
+                                    dropdownMatchSelectWidth={false}
+                                    size="small"
                                     onChange={(status) => {
                                         if (status) {
                                             if (status === 'all') {
@@ -309,21 +326,21 @@ export function OverViewTab({
                                 <span className="ml-1">
                                     <b>Created by</b>
                                 </span>
-                                <LemonSelect
+                                <MemberSelect
+                                    size="small"
+                                    type="secondary"
+                                    defaultLabel="Any user"
+                                    value={filters.created_by ?? null}
                                     onChange={(user) => {
-                                        if (user) {
-                                            if (user === 'any') {
-                                                if (filters) {
-                                                    const { created_by, ...restFilters } = filters
-                                                    setFeatureFlagsFilters(restFilters, true)
-                                                }
-                                            } else {
-                                                setFeatureFlagsFilters({ created_by: user })
+                                        if (!user) {
+                                            if (filters) {
+                                                const { created_by, ...restFilters } = filters
+                                                setFeatureFlagsFilters(restFilters, true)
                                             }
+                                        } else {
+                                            setFeatureFlagsFilters({ created_by: user.id })
                                         }
                                     }}
-                                    options={uniqueCreators}
-                                    value={filters.created_by ?? 'any'}
                                 />
                             </div>
                         </div>
@@ -423,10 +440,7 @@ export function groupFilters(
             ) : (
                 <div className="flex items-center">
                     <span className="shrink-0 mr-2">{rollout_percentage ?? 100}% of</span>
-                    <PropertyFiltersDisplay
-                        filters={properties as AnyPropertyFilter[]}
-                        style={{ margin: 0, flexDirection: 'column' }}
-                    />
+                    <PropertyFiltersDisplay filters={properties as AnyPropertyFilter[]} />
                 </div>
             )
         } else if (rollout_percentage !== null) {

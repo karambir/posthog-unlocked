@@ -1,19 +1,19 @@
-import { ActionFilter } from 'scenes/insights/filters/ActionFilter/ActionFilter'
-import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
-import { PropertyFilters } from 'lib/components/PropertyFilters/PropertyFilters'
-
-import { MathAvailability } from 'scenes/insights/filters/ActionFilter/ActionFilterRow/ActionFilterRow'
-import { LemonLabel } from 'lib/lemon-ui/LemonLabel/LemonLabel'
-import { EntityTypes, FilterableLogLevel, FilterType, RecordingDurationFilter, RecordingFilters } from '~/types'
-import { DateFilter } from 'lib/components/DateFilter/DateFilter'
-import { DurationFilter } from './DurationFilter'
 import { LemonButtonWithDropdown, LemonCheckbox, LemonInput, LemonTag, Tooltip } from '@posthog/lemon-ui'
-import { TestAccountFilter } from 'scenes/insights/filters/TestAccountFilter'
 import { useValues } from 'kea'
-import { FEATURE_FLAGS } from 'lib/constants'
+import { DateFilter } from 'lib/components/DateFilter/DateFilter'
 import { FlaggedFeature } from 'lib/components/FlaggedFeature'
-import { useDebounce } from 'use-debounce'
+import { PropertyFilters } from 'lib/components/PropertyFilters/PropertyFilters'
+import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
+import { FEATURE_FLAGS } from 'lib/constants'
+import { LemonLabel } from 'lib/lemon-ui/LemonLabel/LemonLabel'
+import { ActionFilter } from 'scenes/insights/filters/ActionFilter/ActionFilter'
+import { MathAvailability } from 'scenes/insights/filters/ActionFilter/ActionFilterRow/ActionFilterRow'
+import { TestAccountFilter } from 'scenes/insights/filters/TestAccountFilter'
+
 import { groupsModel } from '~/models/groupsModel'
+import { EntityTypes, FilterableLogLevel, FilterType, RecordingDurationFilter, RecordingFilters } from '~/types'
+
+import { DurationFilter } from './DurationFilter'
 
 export const AdvancedSessionRecordingsFilters = ({
     filters,
@@ -146,12 +146,6 @@ function ConsoleFilters({
         }
     }
 
-    const [onInputDebounced] = useDebounce((s: string): void => {
-        setFilters({
-            console_search_query: s,
-        })
-    }, 250)
-
     return (
         <>
             <LemonLabel>Filter by console logs</LemonLabel>
@@ -161,7 +155,11 @@ function ConsoleFilters({
                         className={'grow'}
                         placeholder={'containing text'}
                         value={filters.console_search_query}
-                        onChange={onInputDebounced}
+                        onChange={(s: string): void => {
+                            setFilters({
+                                console_search_query: s,
+                            })
+                        }}
                     />
 
                     <Tooltip

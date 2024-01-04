@@ -31,6 +31,10 @@
               "type": "datetime"
           },
           {
+              "key": "$session_id",
+              "type": "string"
+          },
+          {
               "key": "pdi",
               "type": "lazy_table",
               "table": "person_distinct_ids",
@@ -39,27 +43,6 @@
                   "distinct_id",
                   "person_id",
                   "person"
-              ]
-          },
-          {
-              "key": "override",
-              "type": "lazy_table",
-              "table": "person_overrides",
-              "fields": [
-                  "team_id",
-                  "old_person_id",
-                  "override_person_id",
-                  "oldest_event",
-                  "merged_at",
-                  "created_at"
-              ]
-          },
-          {
-              "key": "override_person_id",
-              "type": "field_traverser",
-              "chain": [
-                  "override",
-                  "override_person_id"
               ]
           },
           {
@@ -222,6 +205,15 @@
                   "updated_at",
                   "properties"
               ]
+          },
+          {
+              "key": "session",
+              "type": "lazy_table",
+              "table": "events",
+              "fields": [
+                  "id",
+                  "duration"
+              ]
           }
       ],
       "groups": [
@@ -327,14 +319,6 @@
           {
               "key": "distinct_id",
               "type": "string"
-          },
-          {
-              "key": "min_first_timestamp",
-              "type": "datetime"
-          },
-          {
-              "key": "max_last_timestamp",
-              "type": "datetime"
           },
           {
               "key": "first_url",
@@ -813,6 +797,10 @@
               "type": "datetime"
           },
           {
+              "key": "$session_id",
+              "type": "string"
+          },
+          {
               "key": "pdi",
               "type": "lazy_table",
               "table": "person_distinct_ids",
@@ -821,27 +809,6 @@
                   "distinct_id",
                   "person_id",
                   "person"
-              ]
-          },
-          {
-              "key": "override",
-              "type": "lazy_table",
-              "table": "person_overrides",
-              "fields": [
-                  "team_id",
-                  "old_person_id",
-                  "override_person_id",
-                  "oldest_event",
-                  "merged_at",
-                  "created_at"
-              ]
-          },
-          {
-              "key": "override_person_id",
-              "type": "field_traverser",
-              "chain": [
-                  "override",
-                  "override_person_id"
               ]
           },
           {
@@ -999,6 +966,15 @@
                   "updated_at",
                   "properties"
               ]
+          },
+          {
+              "key": "session",
+              "type": "lazy_table",
+              "table": "events",
+              "fields": [
+                  "id",
+                  "duration"
+              ]
           }
       ],
       "groups": [
@@ -1104,14 +1080,6 @@
           {
               "key": "distinct_id",
               "type": "string"
-          },
-          {
-              "key": "min_first_timestamp",
-              "type": "datetime"
-          },
-          {
-              "key": "max_last_timestamp",
-              "type": "datetime"
           },
           {
               "key": "first_url",

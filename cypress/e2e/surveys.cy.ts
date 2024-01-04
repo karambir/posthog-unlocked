@@ -11,10 +11,11 @@ describe('Surveys', () => {
         cy.get('h1').should('contain', 'Surveys')
         cy.title().should('equal', 'Surveys • PostHog')
 
-        cy.get('h2').should('contain', 'Create your first survey')
+        cy.contains('Create your first survey').should('exist')
 
         // go to create a new survey
         cy.get('[data-attr="create-survey"]').click()
+        cy.get('[data-attr="new-blank-survey"]').click()
 
         cy.get('[data-attr="survey-name"]').type(name)
 
@@ -25,7 +26,7 @@ describe('Surveys', () => {
         // back to surveys
         cy.clickNavMenu('surveys')
         cy.get('[data-attr=surveys-table]').should('contain', name)
-        cy.get('h2').should('not.have.text', 'Create your first survey')
+        cy.contains('Create your first survey').should('not.exist')
 
         // back into survey
         cy.get(`[data-row-key="${name}"]`).contains(name).click()
@@ -38,37 +39,6 @@ describe('Surveys', () => {
         cy.get('tbody').should('not.exist')
     })
 
-    it('shows survey disabled banner when surveys disabled', () => {
-        cy.get('div.LemonBanner.LemonBanner--warning.mb-2').should(
-            'contain',
-            'Survey popups are currently disabled for this project'
-        )
-        cy.get('div.LemonBanner.LemonBanner--warning.mb-2').contains('Configure').click()
-
-        cy.contains('Surveys settings').should('exist').should('be.visible')
-
-        cy.get('[data-attr="opt-in-surveys-switch"]').click()
-
-        cy.get('[data-attr=success-toast]').contains('Surveys opt in').should('exist')
-
-        cy.contains('Done').click()
-
-        // now lemon banner should be gone
-        cy.get('div.LemonBanner.LemonBanner--warning.mb-2').should('not.exist')
-
-        // get it back
-        cy.contains('Configure').click()
-        cy.get('[data-attr="opt-in-surveys-switch"]').click()
-        cy.get('[data-attr=success-toast]').contains('Surveys opt in').should('exist')
-        cy.contains('Done').click()
-
-        // now lemon banner should be back
-        cy.get('div.LemonBanner.LemonBanner--warning.mb-2').should(
-            'contain',
-            'Survey popups are currently disabled for this project'
-        )
-    })
-
     it('creates a new survey', () => {
         // load an empty page
         cy.get('h1').should('contain', 'Surveys')
@@ -76,6 +46,7 @@ describe('Surveys', () => {
 
         // click via top right button
         cy.get('[data-attr="new-survey"]').click()
+        cy.get('[data-attr="new-blank-survey"]').click()
 
         // select "add filter" and "property"
         cy.get('[data-attr="survey-name"]').type(name)
@@ -90,7 +61,7 @@ describe('Surveys', () => {
 
         cy.get('[id="scenes.surveys.surveyLogic.new.survey.questions.0.scale"]')
             .invoke('html')
-            .should('include', '1 - 10')
+            .should('include', '0 - 10')
 
         cy.get('[id="scenes.surveys.surveyLogic.new.survey.questions.0.upperBoundLabel"]').should(
             'have.value',
@@ -114,6 +85,9 @@ describe('Surveys', () => {
         cy.get('[data-attr="survey-preview"]').find('form').find('.ratings-number').should('have.length', 5)
 
         // add targeting filters
+        cy.get('.LemonCollapsePanel').contains('Targeting').click()
+        cy.contains('All users').click()
+        cy.get('.Popover__content').contains('Users who match').click()
         cy.contains('Add user targeting').click()
 
         // select the first property
@@ -156,6 +130,7 @@ describe('Surveys', () => {
         cy.get('.Popover__content').contains('Edit').click()
 
         // remove user targeting properties
+        cy.get('.LemonCollapsePanel').contains('Targeting').click()
         cy.contains('Remove all user properties').click()
 
         // save
@@ -176,6 +151,7 @@ describe('Surveys', () => {
     it('Delete survey', () => {
         cy.get('h1').should('contain', 'Surveys')
         cy.get('[data-attr=new-survey]').click()
+        cy.get('[data-attr=new-blank-survey]').click()
         cy.get('[data-attr=survey-name]').focus().type(name).should('have.value', name)
         cy.get('[data-attr=save-survey]').first().click()
 
@@ -188,5 +164,59 @@ describe('Surveys', () => {
         cy.get('[data-attr=more-button]').click()
         cy.get('[data-attr=delete-survey]').click()
         cy.get('.Toastify__toast-body').contains('Survey deleted').should('be.visible')
+    })
+
+    it('creates a new multiple choice survey with an open-ended choice', () => {
+        cy.get('h1').should('contain', 'Surveys')
+        cy.get('[data-attr=new-survey]').click()
+        cy.get('[data-attr=new-blank-survey]').click()
+
+        // add a multiple choice question with an open-ended question
+        cy.get('[data-attr=survey-name]').focus().type(name).should('have.value', name)
+        cy.get('[data-attr="survey-question-type-0"]').click()
+        cy.contains('Multiple choice select').click()
+        cy.get('button').contains('Add open-ended choice').click()
+
+        // check default open-ended choice form input and appearance after
+        // open-ended choice was added
+        cy.get('.LemonInput__input[value="Other"]')
+        cy.get('.choice-option').eq(3).contains('Other:')
+        cy.get('.choice-option').eq(3).find('input[type="text"]').should('have.value', '')
+
+        // typing in open-ended question's appearance automatically checks the
+        // checkbox
+        cy.get('.choice-option').eq(3).find('input[type="checkbox"]').should('not.be.checked')
+        cy.get('.choice-option').eq(3).find('input[type="text"]').type('Outreach')
+        cy.get('.choice-option').eq(3).find('input[type="checkbox"]').should('be.checked')
+
+        // clicking on open-ended question's appearance label unchecks or checks
+        // the checkbox
+        cy.get('.choice-option').eq(3).click()
+        cy.get('.choice-option').eq(3).find('input[type="checkbox"]').should('not.be.checked')
+        cy.get('.choice-option').eq(3).click()
+        cy.get('.choice-option').eq(3).find('input[type="checkbox"]').should('be.checked')
+
+        // removing text in open-ended question's appearance automatically
+        // unchecks the checkbox
+        cy.get('.choice-option').eq(3).find('input[type="text"]').clear()
+
+        // open-ended question label doesn't change even if appearance input
+        // changes
+        cy.get('.LemonInput__input[value="Other"]')
+
+        // change open-ended choice after the label was added
+        cy.contains('Choices').parent().find('input[type="text"]').eq(3).clear()
+        cy.contains('Choices').parent().find('input[type="text"]').eq(3).type('First Choice')
+        cy.get('.choice-option').eq(3).contains('First Choice:')
+
+        // attempt to create and save survey
+        cy.get('[data-attr=save-survey]').first().click()
+
+        // after save there should be a launch button
+        cy.get('button[data-attr="launch-survey"]').should('have.text', 'Launch')
+
+        cy.clickNavMenu('surveys')
+        cy.get('[data-attr=surveys-table]').should('contain', name)
+        cy.get(`[data-row-key="${name}"]`).contains(name).click()
     })
 })

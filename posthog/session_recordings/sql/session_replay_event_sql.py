@@ -1,7 +1,11 @@
 from django.conf import settings
 
 from posthog.clickhouse.kafka_engine import kafka_engine
-from posthog.clickhouse.table_engines import Distributed, ReplicationScheme, AggregatingMergeTree
+from posthog.clickhouse.table_engines import (
+    Distributed,
+    ReplicationScheme,
+    AggregatingMergeTree,
+)
 from posthog.kafka_client.topics import KAFKA_CLICKHOUSE_SESSION_REPLAY_EVENTS
 
 SESSION_REPLAY_EVENTS_DATA_TABLE = lambda: "sharded_session_replay_events"
@@ -29,10 +33,13 @@ CREATE TABLE IF NOT EXISTS {table_name} ON CLUSTER '{cluster}'
     console_error_count Int64,
     size Int64,
     event_count Int64,
-    message_count Int64
+    message_count Int64,
+    snapshot_source LowCardinality(Nullable(String))
 ) ENGINE = {engine}
 """
 
+# if updating these column definitions
+# you'll need to update the explicit column definitions in the materialized view creation statement below
 SESSION_REPLAY_EVENTS_TABLE_BASE_SQL = """
 CREATE TABLE IF NOT EXISTS {table_name} ON CLUSTER '{cluster}'
 (
@@ -63,6 +70,8 @@ CREATE TABLE IF NOT EXISTS {table_name} ON CLUSTER '{cluster}'
     -- often very useful in incidents or debugging
     -- because we batch events we expect message_count to be lower than event_count
     event_count SimpleAggregateFunction(sum, Int64),
+    -- which source the snapshots came from Android, iOS, Mobile, Web. Web if absent
+    snapshot_source AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC')),
     _timestamp SimpleAggregateFunction(max, DateTime)
 ) ENGINE = {engine}
 """
@@ -100,10 +109,10 @@ KAFKA_SESSION_REPLAY_EVENTS_TABLE_SQL = lambda: KAFKA_SESSION_REPLAY_EVENTS_TABL
     engine=kafka_engine(topic=KAFKA_CLICKHOUSE_SESSION_REPLAY_EVENTS),
 )
 
-
-SESSION_REPLAY_EVENTS_TABLE_MV_SQL = lambda: """
+SESSION_REPLAY_EVENTS_TABLE_MV_SQL = (
+    lambda: """
 CREATE MATERIALIZED VIEW IF NOT EXISTS session_replay_events_mv ON CLUSTER '{cluster}'
-TO {database}.{target_table}
+TO {database}.{target_table} {explictly_specify_columns}
 AS SELECT
 session_id,
 team_id,
@@ -131,15 +140,32 @@ sum(size) as size,
 -- we can count the number of kafka messages instead of sending it explicitly
 sum(message_count) as message_count,
 sum(event_count) as event_count,
+argMinState(snapshot_source, first_timestamp) as snapshot_source,
 max(_timestamp) as _timestamp
 FROM {database}.kafka_session_replay_events
 group by session_id, team_id
 """.format(
-    target_table="writable_session_replay_events",
-    cluster=settings.CLICKHOUSE_CLUSTER,
-    database=settings.CLICKHOUSE_DATABASE,
+        target_table="writable_session_replay_events",
+        cluster=settings.CLICKHOUSE_CLUSTER,
+        database=settings.CLICKHOUSE_DATABASE,
+        # ClickHouse is incorrectly expanding the type of the snapshot source column
+        # Despite it being a LowCardinality(Nullable(String)) in writable_session_replay_events
+        # The column expansion picks only Nullable(String) and so we can't select it
+        explictly_specify_columns="""(
+`session_id` String, `team_id` Int64, `distinct_id` String,
+`min_first_timestamp` DateTime64(6, 'UTC'),
+`max_last_timestamp` DateTime64(6, 'UTC'),
+`first_url` AggregateFunction(argMin, Nullable(String), DateTime64(6, 'UTC')),
+`click_count` Int64, `keypress_count` Int64,
+`mouse_activity_count` Int64, `active_milliseconds` Int64,
+`console_log_count` Int64, `console_warn_count` Int64,
+`console_error_count` Int64, `size` Int64, `message_count` Int64,
+`event_count` Int64,
+`snapshot_source` AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC')),
+`_timestamp` Nullable(DateTime)
+)""",
+    )
 )
-
 
 # Distributed engine tables are only created if CLICKHOUSE_REPLICATED
 
@@ -147,17 +173,21 @@ group by session_id, team_id
 WRITABLE_SESSION_REPLAY_EVENTS_TABLE_SQL = lambda: SESSION_REPLAY_EVENTS_TABLE_BASE_SQL.format(
     table_name="writable_session_replay_events",
     cluster=settings.CLICKHOUSE_CLUSTER,
-    engine=Distributed(data_table=SESSION_REPLAY_EVENTS_DATA_TABLE(), sharding_key="sipHash64(distinct_id)"),
+    engine=Distributed(
+        data_table=SESSION_REPLAY_EVENTS_DATA_TABLE(),
+        sharding_key="sipHash64(distinct_id)",
+    ),
 )
-
 
 # This table is responsible for reading from session_replay_events on a cluster setting
 DISTRIBUTED_SESSION_REPLAY_EVENTS_TABLE_SQL = lambda: SESSION_REPLAY_EVENTS_TABLE_BASE_SQL.format(
     table_name="session_replay_events",
     cluster=settings.CLICKHOUSE_CLUSTER,
-    engine=Distributed(data_table=SESSION_REPLAY_EVENTS_DATA_TABLE(), sharding_key="sipHash64(distinct_id)"),
+    engine=Distributed(
+        data_table=SESSION_REPLAY_EVENTS_DATA_TABLE(),
+        sharding_key="sipHash64(distinct_id)",
+    ),
 )
-
 
 DROP_SESSION_REPLAY_EVENTS_TABLE_SQL = lambda: (
     f"DROP TABLE IF EXISTS {SESSION_REPLAY_EVENTS_DATA_TABLE()} ON CLUSTER '{settings.CLICKHOUSE_CLUSTER}'"

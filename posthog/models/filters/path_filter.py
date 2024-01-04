@@ -17,11 +17,14 @@ from .mixins.common import (
     SampleMixin,
     SearchMixin,
 )
-from .mixins.funnel import FunnelCorrelationMixin, FunnelPersonsStepMixin, FunnelWindowMixin
+from .mixins.funnel import (
+    FunnelCorrelationMixin,
+    FunnelPersonsStepMixin,
+    FunnelWindowMixin,
+)
 from .mixins.groups import GroupsAggregationMixin
 from .mixins.interval import IntervalMixin
 from .mixins.paths import (
-    ComparatorDerivedMixin,
     EndPointMixin,
     FunnelPathsMixin,
     LocalPathCleaningFiltersMixin,
@@ -30,9 +33,7 @@ from .mixins.paths import (
     PathPersonsMixin,
     PathReplacementMixin,
     PathStepLimitMixin,
-    PropTypeDerivedMixin,
     StartPointMixin,
-    TargetEventDerivedMixin,
     TargetEventsMixin,
     PathsHogQLExpressionMixin,
 )
@@ -43,9 +44,6 @@ from .mixins.simplify import SimplifyFilterMixin
 class PathFilter(
     StartPointMixin,
     EndPointMixin,
-    TargetEventDerivedMixin,
-    ComparatorDerivedMixin,
-    PropTypeDerivedMixin,
     PropertyMixin,
     IntervalMixin,
     InsightMixin,
@@ -76,7 +74,12 @@ class PathFilter(
     BaseFilter,
     SampleMixin,
 ):
-    def __init__(self, data: Optional[Dict[str, Any]] = None, request: Optional[Request] = None, **kwargs) -> None:
+    def __init__(
+        self,
+        data: Optional[Dict[str, Any]] = None,
+        request: Optional[Request] = None,
+        **kwargs,
+    ) -> None:
         if data:
             data["insight"] = INSIGHT_PATHS
         else:

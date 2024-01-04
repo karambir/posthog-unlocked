@@ -1,11 +1,13 @@
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from pydantic import ConfigDict, BaseModel
 
+from posthog.hogql.base import Expr
 from posthog.hogql.errors import HogQLException, NotImplementedException
 from posthog.schema import HogQLQueryModifiers
 
 if TYPE_CHECKING:
     from posthog.hogql.context import HogQLContext
+    from posthog.hogql.ast import SelectQuery
 
 
 class FieldOrTable(BaseModel):
@@ -56,6 +58,10 @@ class BooleanDatabaseField(DatabaseField):
     pass
 
 
+class ExpressionField(DatabaseField):
+    expr: Expr
+
+
 class FieldTraverser(FieldOrTable):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,10 +95,15 @@ class Table(FieldOrTable):
         for key, field in self.fields.items():
             if key in fields_to_avoid:
                 continue
-            if isinstance(field, DatabaseField):
+            if (
+                isinstance(field, Table)
+                or isinstance(field, LazyJoin)
+                or isinstance(field, FieldTraverser)
+                or isinstance(field, ExpressionField)
+            ):
+                pass  # ignore virtual tables and columns for now
+            elif isinstance(field, DatabaseField):
                 asterisk[key] = field
-            elif isinstance(field, Table) or isinstance(field, LazyJoin) or isinstance(field, FieldTraverser):
-                pass  # ignore virtual tables for now
             else:
                 raise HogQLException(f"Unknown field type {type(field).__name__} for asterisk")
         return asterisk
@@ -101,7 +112,7 @@ class Table(FieldOrTable):
 class LazyJoin(FieldOrTable):
     model_config = ConfigDict(extra="forbid")
 
-    join_function: Callable[[str, str, Dict[str, Any], HogQLQueryModifiers], Any]
+    join_function: Callable[[str, str, Dict[str, Any], "HogQLContext", "SelectQuery"], Any]
     join_table: Table
     from_field: str
 

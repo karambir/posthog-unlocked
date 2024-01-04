@@ -1,5 +1,6 @@
 import { OPTIONS } from 'scenes/feature-flags/FeatureFlagCodeOptions'
 import { CodeInstructions } from 'scenes/feature-flags/FeatureFlagInstructions'
+
 import { SDKKey } from '~/types'
 
 export const FlagImplementationSnippet = ({ sdkKey }: { sdkKey: SDKKey }): JSX.Element => {
@@ -14,8 +15,8 @@ export const FlagImplementationSnippet = ({ sdkKey }: { sdkKey: SDKKey }): JSX.E
             />
             <h3>Running experiments</h3>
             <p>
-                Experiments run on top of our feature flags. Once you've implemented the flag in your code, you you'll
-                run an A/B test by creating a new experiment in the PostHog dashboard.
+                Experiments run on top of our feature flags. Once you've implemented the flag in your code, you run an
+                A/B test by creating a new experiment in the PostHog dashboard.
             </p>
         </>
     )

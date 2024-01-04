@@ -1,8 +1,10 @@
-import { kea } from 'kea'
-import api from '~/lib/api'
-import { BatchExportLogEntryLevel, BatchExportLogEntry } from '~/types'
 import { CheckboxValueType } from 'antd/lib/checkbox/Group'
+import { actions, connect, events, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { loaders } from 'kea-loaders'
 import { teamLogic } from 'scenes/teamLogic'
+
+import api from '~/lib/api'
+import { BatchExportLogEntry, BatchExportLogEntryLevel } from '~/types'
 
 import type { batchExportLogsLogicType } from './batchExportLogsLogicType'
 
@@ -12,25 +14,22 @@ export interface BatchExportLogsProps {
 
 export const LOGS_PORTION_LIMIT = 50
 
-export const batchExportLogsLogic = kea<batchExportLogsLogicType>({
-    path: (batchExportId) => ['scenes', 'batch_exports', 'batchExportLogsLogic', batchExportId],
-    props: {} as BatchExportLogsProps,
-    key: ({ batchExportId }: BatchExportLogsProps) => batchExportId,
-
-    connect: {
+export const batchExportLogsLogic = kea<batchExportLogsLogicType>([
+    props({} as BatchExportLogsProps),
+    key(({ batchExportId }: BatchExportLogsProps) => batchExportId),
+    path((batchExportId) => ['scenes', 'batch_exports', 'batchExportLogsLogic', batchExportId]),
+    connect({
         values: [teamLogic, ['currentTeamId']],
-    },
-
-    actions: {
+    }),
+    actions({
         clearBatchExportLogsBackground: true,
         markLogsEnd: true,
         setBatchExportLogsTypes: (typeFilters: CheckboxValueType[]) => ({
             typeFilters,
         }),
         setSearchTerm: (searchTerm: string) => ({ searchTerm }),
-    },
-
-    loaders: ({ props: { batchExportId }, values, actions, cache }) => ({
+    }),
+    loaders(({ props: { batchExportId }, values, actions, cache }) => ({
         batchExportLogs: {
             __default: [] as BatchExportLogEntry[],
             loadBatchExportLogs: async () => {
@@ -86,21 +85,8 @@ export const batchExportLogsLogic = kea<batchExportLogsLogicType>({
                 return [...results, ...values.batchExportLogsBackground]
             },
         },
-    }),
-
-    listeners: ({ actions }) => ({
-        setBatchExportLogsTypes: () => {
-            actions.loadBatchExportLogs()
-        },
-        setSearchTerm: async ({ searchTerm }, breakpoint) => {
-            if (searchTerm) {
-                await breakpoint(1000)
-            }
-            actions.loadBatchExportLogs()
-        },
-    }),
-
-    reducers: {
+    })),
+    reducers({
         batchExportLogsTypes: [
             Object.values(BatchExportLogEntryLevel).filter((type) => type !== 'DEBUG'),
             {
@@ -133,9 +119,8 @@ export const batchExportLogsLogic = kea<batchExportLogsLogicType>({
                 markLogsEnd: () => false,
             },
         ],
-    },
-
-    selectors: ({ selectors }) => ({
+    }),
+    selectors(({ selectors }) => ({
         leadingEntry: [
             () => [selectors.batchExportLogs, selectors.batchExportLogsBackground],
             (
@@ -166,14 +151,24 @@ export const batchExportLogsLogic = kea<batchExportLogsLogicType>({
                 return null
             },
         ],
-    }),
-
-    events: ({ actions, cache }) => ({
+    })),
+    listeners(({ actions }) => ({
+        setBatchExportLogsTypes: () => {
+            actions.loadBatchExportLogs()
+        },
+        setSearchTerm: async ({ searchTerm }, breakpoint) => {
+            if (searchTerm) {
+                await breakpoint(1000)
+            }
+            actions.loadBatchExportLogs()
+        },
+    })),
+    events(({ actions, cache }) => ({
         afterMount: () => {
             actions.loadBatchExportLogs()
         },
         beforeUnmount: () => {
             clearInterval(cache.pollingInterval)
         },
-    }),
-})
+    })),
+])

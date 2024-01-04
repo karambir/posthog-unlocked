@@ -1,6 +1,7 @@
-import { Mark, getMarkRange, mergeAttributes } from '@tiptap/core'
-import { linkPasteRule } from '../Nodes/utils'
+import { getMarkRange, Mark, mergeAttributes } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
+
+import { linkPasteRule } from '../Nodes/utils'
 
 export const NotebookMarkLink = Mark.create({
     name: 'link',
@@ -59,5 +60,10 @@ export const NotebookMarkLink = Mark.create({
 })
 
 const isPostHogLink = (href: string): boolean => {
-    return new URL(href, window.location.origin).origin === window.location.origin
+    try {
+        const url = new URL(href, window.location.origin)
+        return url.origin === window.location.origin
+    } catch {
+        return false
+    }
 }

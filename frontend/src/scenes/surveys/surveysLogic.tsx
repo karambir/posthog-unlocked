@@ -1,16 +1,19 @@
-import { afterMount, connect, kea, listeners, path, selectors, actions, reducers } from 'kea'
-import { loaders } from 'kea-loaders'
-import api from 'lib/api'
+import { lemonToast } from '@posthog/lemon-ui'
 import Fuse from 'fuse.js'
-import { AvailableFeature, Breadcrumb, ProgressStatus, Survey } from '~/types'
+import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
+import { loaders } from 'kea-loaders'
+import { router } from 'kea-router'
+import api from 'lib/api'
+import { FEATURE_FLAGS } from 'lib/constants'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { Scene } from 'scenes/sceneTypes'
+import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
+import { userLogic } from 'scenes/userLogic'
+
+import { AvailableFeature, Breadcrumb, ProgressStatus, Survey, SurveyType } from '~/types'
 
 import type { surveysLogicType } from './surveysLogicType'
-import { lemonToast } from '@posthog/lemon-ui'
-import { userLogic } from 'scenes/userLogic'
-import { router } from 'kea-router'
-import { pluginsLogic } from 'scenes/plugins/pluginsLogic'
-import { LemonSelectOption } from 'lib/lemon-ui/LemonSelect'
 
 export function getSurveyStatus(survey: Survey): ProgressStatus {
     if (!survey.start_date) {
@@ -23,18 +26,22 @@ export function getSurveyStatus(survey: Survey): ProgressStatus {
 
 export interface SurveysFilters {
     status: string
-    created_by: string
+    created_by: null | number
     archived: boolean
-}
-
-interface SurveysCreators {
-    [id: string]: string
 }
 
 export const surveysLogic = kea<surveysLogicType>([
     path(['scenes', 'surveys', 'surveysLogic']),
     connect(() => ({
-        values: [pluginsLogic, ['loading as pluginsLoading', 'enabledPlugins'], userLogic, ['user']],
+        values: [
+            userLogic,
+            ['hasAvailableFeature'],
+            teamLogic,
+            ['currentTeam', 'currentTeamLoading'],
+            featureFlagLogic,
+            ['featureFlags'],
+        ],
+        actions: [teamLogic, ['loadCurrentTeam']],
     })),
     actions({
         setSearchTerm: (searchTerm: string) => ({ searchTerm }),
@@ -72,7 +79,7 @@ export const surveysLogic = kea<surveysLogicType>([
             {
                 archived: false,
                 status: 'any',
-                created_by: 'any',
+                created_by: null,
             } as Partial<SurveysFilters>,
             {
                 setSurveysFilters: (state, { filters }) => {
@@ -88,10 +95,14 @@ export const surveysLogic = kea<surveysLogicType>([
         },
         updateSurveySuccess: () => {
             lemonToast.success('Survey updated')
+            actions.loadCurrentTeam()
         },
         setSurveysFilters: () => {
             actions.loadSurveys()
             actions.loadResponsesCount()
+        },
+        loadSurveysSuccess: () => {
+            actions.loadCurrentTeam()
         },
     })),
     selectors({
@@ -117,10 +128,8 @@ export const surveysLogic = kea<surveysLogicType>([
                 if (status !== 'any') {
                     searchedSurveys = searchedSurveys.filter((survey) => getSurveyStatus(survey) === status)
                 }
-                if (created_by !== 'any') {
-                    searchedSurveys = searchedSurveys.filter(
-                        (survey) => survey.created_by?.id === (created_by ? parseInt(created_by) : '')
-                    )
+                if (created_by) {
+                    searchedSurveys = searchedSurveys.filter((survey) => survey.created_by?.id === created_by)
                 }
 
                 if (archived) {
@@ -136,37 +145,41 @@ export const surveysLogic = kea<surveysLogicType>([
             () => [],
             (): Breadcrumb[] => [
                 {
+                    key: Scene.Surveys,
                     name: 'Surveys',
                     path: urls.surveys(),
                 },
             ],
         ],
-        uniqueCreators: [
-            (selectors) => [selectors.surveys],
-            (surveys) => {
-                const creators: SurveysCreators = {}
-                for (const survey of surveys) {
-                    if (survey.created_by) {
-                        if (!creators[survey.created_by.id]) {
-                            creators[survey.created_by.id] = survey.created_by.first_name
-                        }
-                    }
-                }
-                const response: LemonSelectOption<string>[] = [
-                    { label: 'Any user', value: 'any' },
-                    ...Object.entries(creators).map(([id, first_name]) => ({ label: first_name, value: id })),
-                ]
-                return response
-            },
-        ],
+        payGateFlagOn: [(s) => [s.featureFlags], (featureFlags) => featureFlags[FEATURE_FLAGS.SURVEYS_PAYGATES]],
         whitelabelAvailable: [
-            (s) => [s.user],
-            (user) => (user?.organization?.available_features || []).includes(AvailableFeature.WHITE_LABELLING),
+            (s) => [s.hasAvailableFeature],
+            (hasAvailableFeature) => hasAvailableFeature(AvailableFeature.WHITE_LABELLING),
         ],
-        usingSurveysSiteApp: [
-            (s) => [s.enabledPlugins, s.pluginsLoading],
-            (enabledPlugins, pluginsLoading): boolean => {
-                return !!(!pluginsLoading && enabledPlugins.find((plugin) => plugin.name === 'Surveys app'))
+        surveysStylingAvailable: [
+            (s) => [s.hasAvailableFeature, s.payGateFlagOn],
+            (hasAvailableFeature, payGateFlagOn) =>
+                !payGateFlagOn || (payGateFlagOn && hasAvailableFeature(AvailableFeature.SURVEYS_STYLING)),
+        ],
+        surveysHTMLAvailable: [
+            (s) => [s.hasAvailableFeature, s.payGateFlagOn],
+            (hasAvailableFeature, payGateFlagOn) =>
+                !payGateFlagOn || (payGateFlagOn && hasAvailableFeature(AvailableFeature.SURVEYS_TEXT_HTML)),
+        ],
+        surveysMultipleQuestionsAvailable: [
+            (s) => [s.hasAvailableFeature, s.payGateFlagOn],
+            (hasAvailableFeature, payGateFlagOn) =>
+                !payGateFlagOn || (payGateFlagOn && hasAvailableFeature(AvailableFeature.SURVEYS_MULTIPLE_QUESTIONS)),
+        ],
+        showSurveysDisabledBanner: [
+            (s) => [s.currentTeam, s.currentTeamLoading, s.surveys],
+            (currentTeam, currentTeamLoading, surveys) => {
+                return (
+                    !currentTeamLoading &&
+                    currentTeam &&
+                    !currentTeam.surveys_opt_in &&
+                    surveys.some((s) => s.start_date && !s.end_date && s.type !== SurveyType.API)
+                )
             },
         ],
     }),

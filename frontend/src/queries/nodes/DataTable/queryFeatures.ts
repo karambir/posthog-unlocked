@@ -1,14 +1,13 @@
+import { Node } from '~/queries/schema'
 import {
+    isActorsQuery,
     isEventsQuery,
     isHogQLQuery,
     isPersonsNode,
-    isPersonsQuery,
-    isWebOverviewStatsQuery,
+    isWebOverviewQuery,
+    isWebStatsTableQuery,
     isWebTopClicksQuery,
-    isWebTopPagesQuery,
-    isWebTopSourcesQuery,
 } from '~/queries/utils'
-import { Node } from '~/queries/schema'
 
 export enum QueryFeature {
     columnsInResponse,
@@ -44,23 +43,18 @@ export function getQueryFeatures(query: Node): Set<QueryFeature> {
         features.add(QueryFeature.selectAndOrderByColumns)
     }
 
-    if (isPersonsNode(query) || isPersonsQuery(query)) {
+    if (isPersonsNode(query) || isActorsQuery(query)) {
         features.add(QueryFeature.personPropertyFilters)
         features.add(QueryFeature.personsSearch)
 
-        if (isPersonsQuery(query)) {
+        if (isActorsQuery(query)) {
             features.add(QueryFeature.selectAndOrderByColumns)
             features.add(QueryFeature.columnsInResponse)
             features.add(QueryFeature.resultIsArrayOfArrays)
         }
     }
 
-    if (
-        isWebOverviewStatsQuery(query) ||
-        isWebTopSourcesQuery(query) ||
-        isWebTopPagesQuery(query) ||
-        isWebTopClicksQuery(query)
-    ) {
+    if (isWebOverviewQuery(query) || isWebTopClicksQuery(query) || isWebStatsTableQuery(query)) {
         features.add(QueryFeature.columnsInResponse)
         features.add(QueryFeature.resultIsArrayOfArrays)
     }

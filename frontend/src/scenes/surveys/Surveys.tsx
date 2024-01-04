@@ -4,33 +4,35 @@ import {
     LemonInput,
     LemonSelect,
     LemonTable,
-    Link,
     LemonTag,
     LemonTagType,
+    Link,
     Spinner,
 } from '@posthog/lemon-ui'
-import { PageHeader } from 'lib/components/PageHeader'
-import { More } from 'lib/lemon-ui/LemonButton/More'
-import stringWithWBR from 'lib/utils/stringWithWBR'
-import { SceneExport } from 'scenes/sceneTypes'
-import { urls } from 'scenes/urls'
-import { getSurveyStatus, surveysLogic } from './surveysLogic'
-import { createdAtColumn, createdByColumn } from 'lib/lemon-ui/LemonTable/columnUtils'
-import { ProductKey, ProgressStatus, Survey } from '~/types'
-import { LemonTableColumn } from 'lib/lemon-ui/LemonTable'
 import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
-import { LemonTabs } from 'lib/lemon-ui/LemonTabs'
-import { useState } from 'react'
+import { MemberSelect } from 'lib/components/MemberSelect'
+import { PageHeader } from 'lib/components/PageHeader'
 import { ProductIntroduction } from 'lib/components/ProductIntroduction/ProductIntroduction'
-import { userLogic } from 'scenes/userLogic'
-import { dayjs } from 'lib/dayjs'
 import { VersionCheckerBanner } from 'lib/components/VersionChecker/VersionCheckerBanner'
-import { teamLogic } from 'scenes/teamLogic'
-import { LemonBanner } from 'lib/lemon-ui/LemonBanner'
+import { dayjs } from 'lib/dayjs'
 import { IconSettings } from 'lib/lemon-ui/icons'
-import { openSurveysSettingsDialog } from './SurveySettings'
+import { LemonBanner } from 'lib/lemon-ui/LemonBanner'
+import { More } from 'lib/lemon-ui/LemonButton/More'
+import { LemonTableColumn } from 'lib/lemon-ui/LemonTable'
+import { createdAtColumn, createdByColumn } from 'lib/lemon-ui/LemonTable/columnUtils'
+import { LemonTabs } from 'lib/lemon-ui/LemonTabs'
+import stringWithWBR from 'lib/utils/stringWithWBR'
+import { useState } from 'react'
+import { SceneExport } from 'scenes/sceneTypes'
+import { urls } from 'scenes/urls'
+import { userLogic } from 'scenes/userLogic'
+
+import { ProductKey, ProgressStatus, Survey } from '~/types'
+
 import { SurveyQuestionLabel } from './constants'
+import { openSurveysSettingsDialog } from './SurveySettings'
+import { getSurveyStatus, surveysLogic } from './surveysLogic'
 
 export const scene: SceneExport = {
     component: Surveys,
@@ -50,17 +52,14 @@ export function Surveys(): JSX.Element {
         surveysLoading,
         surveysResponsesCount,
         surveysResponsesCountLoading,
-        usingSurveysSiteApp,
         searchTerm,
         filters,
-        uniqueCreators,
+        showSurveysDisabledBanner,
     } = useValues(surveysLogic)
 
     const { deleteSurvey, updateSurvey, setSearchTerm, setSurveysFilters } = useActions(surveysLogic)
 
     const { user } = useValues(userLogic)
-    const { currentTeam } = useValues(teamLogic)
-    const surveysPopupDisabled = currentTeam && !currentTeam?.surveys_opt_in
 
     const [tab, setSurveyTab] = useState(SurveysTabs.Active)
     const shouldShowEmptyState = !surveysLoading && surveys.length === 0
@@ -68,25 +67,27 @@ export function Surveys(): JSX.Element {
     return (
         <div>
             <PageHeader
-                title={
-                    <div className="flex items-center gap-2">
-                        Surveys
-                        <LemonTag type="warning" className="uppercase">
-                            Beta
-                        </LemonTag>
-                    </div>
-                }
+                title="Surveys"
                 buttons={
                     <>
-                        <LemonButton type="primary" to={urls.survey('new')} data-attr="new-survey">
-                            New survey
-                        </LemonButton>
                         <LemonButton
-                            type="secondary"
-                            icon={<IconSettings />}
-                            onClick={() => openSurveysSettingsDialog()}
+                            to={urls.surveyTemplates()}
+                            type="primary"
+                            data-attr="new-survey"
+                            sideAction={{
+                                dropdown: {
+                                    placement: 'bottom-start',
+                                    actionable: true,
+                                    overlay: (
+                                        <LemonButton size="small" to={urls.survey('new')}>
+                                            Create blank survey
+                                        </LemonButton>
+                                    ),
+                                },
+                                'data-attr': 'saved-insights-new-insight-dropdown',
+                            }}
                         >
-                            Configure
+                            New survey
                         </LemonButton>
                     </>
                 }
@@ -104,6 +105,7 @@ export function Surveys(): JSX.Element {
                         to learn more.
                     </>
                 }
+                tabbedPage
             />
             <LemonTabs
                 activeKey={tab}
@@ -117,9 +119,9 @@ export function Surveys(): JSX.Element {
                 ]}
             />
             <div className="space-y-2">
-                <VersionCheckerBanner />
+                <VersionCheckerBanner minVersionAccepted="1.83.0" />
 
-                {surveysPopupDisabled ? (
+                {showSurveysDisabledBanner ? (
                     <LemonBanner
                         type="warning"
                         action={{
@@ -130,9 +132,8 @@ export function Surveys(): JSX.Element {
                         }}
                         className="mb-2"
                     >
-                        {usingSurveysSiteApp
-                            ? 'Survey site apps are now deprecated. Configure and enable surveys popup in the settings here to move to the new system.'
-                            : 'Survey popups are currently disabled for this project.'}
+                        Survey popovers are currently disabled for this project but there are active surveys running.
+                        Re-enable them in the settings.
                     </LemonBanner>
                 ) : null}
             </div>
@@ -145,7 +146,7 @@ export function Surveys(): JSX.Element {
                         description={
                             'Use surveys to gather qualitative feedback from your users on new or existing features.'
                         }
-                        action={() => router.actions.push(urls.survey('new'))}
+                        action={() => router.actions.push(urls.surveyTemplates())}
                         isEmpty={surveys.length === 0}
                         productKey={ProductKey.SURVEYS}
                     />
@@ -153,7 +154,7 @@ export function Surveys(): JSX.Element {
                 {!shouldShowEmptyState && (
                     <>
                         <div>
-                            <div className="flex justify-between mb-4">
+                            <div className="flex justify-between mb-4 gap-2 flex-wrap">
                                 <LemonInput
                                     type="search"
                                     placeholder="Search for surveys"
@@ -169,6 +170,7 @@ export function Surveys(): JSX.Element {
                                         onChange={(status) => {
                                             setSurveysFilters({ status })
                                         }}
+                                        size="small"
                                         options={[
                                             { label: 'Any', value: 'any' },
                                             { label: 'Draft', value: 'draft' },
@@ -180,12 +182,12 @@ export function Surveys(): JSX.Element {
                                     <span className="ml-1">
                                         <b>Created by</b>
                                     </span>
-                                    <LemonSelect
-                                        onChange={(user) => {
-                                            setSurveysFilters({ created_by: user })
-                                        }}
-                                        options={uniqueCreators}
-                                        value={filters.created_by}
+                                    <MemberSelect
+                                        size="small"
+                                        type="secondary"
+                                        defaultLabel="Any user"
+                                        value={filters.created_by ?? null}
+                                        onChange={(user) => setSurveysFilters({ created_by: user?.id })}
                                     />
                                 </div>
                             </div>
@@ -292,14 +294,14 @@ export function Surveys(): JSX.Element {
                                                             <LemonButton
                                                                 status="stealth"
                                                                 fullWidth
-                                                                onClick={() =>
+                                                                onClick={() => {
                                                                     updateSurvey({
                                                                         id: survey.id,
                                                                         updatePayload: {
                                                                             end_date: dayjs().toISOString(),
                                                                         },
                                                                     })
-                                                                }
+                                                                }}
                                                             >
                                                                 Stop survey
                                                             </LemonButton>
@@ -308,12 +310,12 @@ export function Surveys(): JSX.Element {
                                                             <LemonButton
                                                                 status="stealth"
                                                                 fullWidth
-                                                                onClick={() =>
+                                                                onClick={() => {
                                                                     updateSurvey({
                                                                         id: survey.id,
                                                                         updatePayload: { end_date: null },
                                                                     })
-                                                                }
+                                                                }}
                                                             >
                                                                 Resume survey
                                                             </LemonButton>

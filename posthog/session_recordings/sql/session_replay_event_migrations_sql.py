@@ -1,6 +1,8 @@
 from django.conf import settings
 
-from posthog.session_recordings.sql.session_replay_event_sql import SESSION_REPLAY_EVENTS_DATA_TABLE
+from posthog.session_recordings.sql.session_replay_event_sql import (
+    SESSION_REPLAY_EVENTS_DATA_TABLE,
+)
 
 DROP_SESSION_REPLAY_EVENTS_TABLE_MV_SQL = (
     lambda: "DROP TABLE IF EXISTS session_replay_events_mv ON CLUSTER {cluster}".format(
@@ -88,6 +90,27 @@ ADD_EVENT_COUNT_WRITABLE_SESSION_REPLAY_EVENTS_TABLE_SQL = lambda: ALTER_SESSION
 )
 
 ADD_EVENT_COUNT_SESSION_REPLAY_EVENTS_TABLE_SQL = lambda: ALTER_SESSION_REPLAY_ADD_EVENT_COUNT_COLUMN.format(
+    table_name=SESSION_REPLAY_EVENTS_DATA_TABLE(),
+    cluster=settings.CLICKHOUSE_CLUSTER,
+)
+
+# migration to add source column to the session replay table
+ALTER_SESSION_REPLAY_ADD_SOURCE_COLUMN = """
+    ALTER TABLE {table_name} on CLUSTER '{cluster}'
+    ADD COLUMN IF NOT EXISTS snapshot_source AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC'))
+"""
+
+ADD_SOURCE_DISTRIBUTED_SESSION_REPLAY_EVENTS_TABLE_SQL = lambda: ALTER_SESSION_REPLAY_ADD_SOURCE_COLUMN.format(
+    table_name="session_replay_events",
+    cluster=settings.CLICKHOUSE_CLUSTER,
+)
+
+ADD_SOURCE_WRITABLE_SESSION_REPLAY_EVENTS_TABLE_SQL = lambda: ALTER_SESSION_REPLAY_ADD_SOURCE_COLUMN.format(
+    table_name="writable_session_replay_events",
+    cluster=settings.CLICKHOUSE_CLUSTER,
+)
+
+ADD_SOURCE_SESSION_REPLAY_EVENTS_TABLE_SQL = lambda: ALTER_SESSION_REPLAY_ADD_SOURCE_COLUMN.format(
     table_name=SESSION_REPLAY_EVENTS_DATA_TABLE(),
     cluster=settings.CLICKHOUSE_CLUSTER,
 )

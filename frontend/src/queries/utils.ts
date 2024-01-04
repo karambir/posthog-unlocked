@@ -1,41 +1,43 @@
-import {
-    ActionsNode,
-    DataTableNode,
-    DateRange,
-    EventsNode,
-    EventsQuery,
-    HogQLQuery,
-    TrendsQuery,
-    FunnelsQuery,
-    RetentionQuery,
-    PathsQuery,
-    StickinessQuery,
-    LifecycleQuery,
-    InsightFilter,
-    InsightFilterProperty,
-    InsightQueryNode,
-    InsightVizNode,
-    Node,
-    NodeKind,
-    PersonsNode,
-    TimeToSeeDataNode,
-    TimeToSeeDataQuery,
-    TimeToSeeDataSessionsQuery,
-    InsightNodeKind,
-    TimeToSeeDataWaterfallNode,
-    TimeToSeeDataJSONNode,
-    DatabaseSchemaQuery,
-    SavedInsightNode,
-    WebTopSourcesQuery,
-    WebTopClicksQuery,
-    WebTopPagesQuery,
-    WebOverviewStatsQuery,
-    PersonsQuery,
-    HogQLMetadata,
-} from '~/queries/schema'
 import { TaxonomicFilterGroupType, TaxonomicFilterValue } from 'lib/components/TaxonomicFilter/types'
 import { dayjs } from 'lib/dayjs'
 import { teamLogic } from 'scenes/teamLogic'
+
+import {
+    ActionsNode,
+    ActorsQuery,
+    DatabaseSchemaQuery,
+    DataTableNode,
+    DataVisualizationNode,
+    DateRange,
+    EventsNode,
+    EventsQuery,
+    FunnelsQuery,
+    HogQLMetadata,
+    HogQLQuery,
+    InsightActorsQuery,
+    InsightFilter,
+    InsightFilterProperty,
+    InsightNodeKind,
+    InsightQueryNode,
+    InsightVizNode,
+    LifecycleQuery,
+    Node,
+    NodeKind,
+    PathsQuery,
+    PersonsNode,
+    RetentionQuery,
+    SavedInsightNode,
+    StickinessQuery,
+    TimeToSeeDataJSONNode,
+    TimeToSeeDataNode,
+    TimeToSeeDataQuery,
+    TimeToSeeDataSessionsQuery,
+    TimeToSeeDataWaterfallNode,
+    TrendsQuery,
+    WebOverviewQuery,
+    WebStatsTableQuery,
+    WebTopClicksQuery,
+} from '~/queries/schema'
 
 export function isDataNode(node?: Node | null): node is EventsQuery | PersonsNode | TimeToSeeDataSessionsQuery {
     return (
@@ -44,7 +46,7 @@ export function isDataNode(node?: Node | null): node is EventsQuery | PersonsNod
         isPersonsNode(node) ||
         isTimeToSeeDataSessionsQuery(node) ||
         isEventsQuery(node) ||
-        isPersonsQuery(node) ||
+        isActorsQuery(node) ||
         isHogQLQuery(node) ||
         isHogQLMetadata(node)
     )
@@ -67,6 +69,7 @@ export function isNodeWithSource(
 
     return (
         isDataTableNode(node) ||
+        isDataVisualizationNode(node) ||
         isInsightVizNode(node) ||
         isTimeToSeeDataWaterfallNode(node) ||
         isTimeToSeeDataJSONNode(node)
@@ -89,12 +92,20 @@ export function isPersonsNode(node?: Node | null): node is PersonsNode {
     return node?.kind === NodeKind.PersonsNode
 }
 
-export function isPersonsQuery(node?: Node | null): node is PersonsQuery {
-    return node?.kind === NodeKind.PersonsQuery
+export function isActorsQuery(node?: Node | null): node is ActorsQuery {
+    return node?.kind === NodeKind.ActorsQuery
+}
+
+export function isInsightActorsQuery(node?: Node | null): node is InsightActorsQuery {
+    return node?.kind === NodeKind.InsightActorsQuery
 }
 
 export function isDataTableNode(node?: Node | null): node is DataTableNode {
     return node?.kind === NodeKind.DataTableNode
+}
+
+export function isDataVisualizationNode(node?: Node | null): node is DataVisualizationNode {
+    return node?.kind === NodeKind.DataVisualizationNode
 }
 
 export function isSavedInsightNode(node?: Node | null): node is SavedInsightNode {
@@ -113,20 +124,16 @@ export function isHogQLMetadata(node?: Node | null): node is HogQLMetadata {
     return node?.kind === NodeKind.HogQLMetadata
 }
 
-export function isWebOverviewStatsQuery(node?: Node | null): node is WebOverviewStatsQuery {
-    return node?.kind === NodeKind.WebOverviewStatsQuery
+export function isWebOverviewQuery(node?: Node | null): node is WebOverviewQuery {
+    return node?.kind === NodeKind.WebOverviewQuery
 }
 
-export function isWebTopSourcesQuery(node?: Node | null): node is WebTopSourcesQuery {
-    return node?.kind === NodeKind.WebTopSourcesQuery
+export function isWebStatsTableQuery(node?: Node | null): node is WebStatsTableQuery {
+    return node?.kind === NodeKind.WebStatsTableQuery
 }
 
 export function isWebTopClicksQuery(node?: Node | null): node is WebTopClicksQuery {
     return node?.kind === NodeKind.WebTopClicksQuery
-}
-
-export function isWebTopPagesQuery(node?: Node | null): node is WebTopPagesQuery {
-    return node?.kind === NodeKind.WebTopPagesQuery
 }
 
 export function containsHogQLQuery(node?: Node | null): boolean {
@@ -164,10 +171,6 @@ export function isLifecycleQuery(node?: Node | null): node is LifecycleQuery {
     return node?.kind === NodeKind.LifecycleQuery
 }
 
-export function isQueryWithHogQLSupport(node?: Node | null): node is LifecycleQuery {
-    return isLifecycleQuery(node) || isTrendsQuery(node)
-}
-
 export function isInsightQueryWithDisplay(node?: Node | null): node is TrendsQuery | StickinessQuery {
     return isTrendsQuery(node) || isStickinessQuery(node)
 }
@@ -178,6 +181,15 @@ export function isInsightQueryWithBreakdown(node?: Node | null): node is TrendsQ
 
 export function isDatabaseSchemaQuery(node?: Node): node is DatabaseSchemaQuery {
     return node?.kind === NodeKind.DatabaseSchemaQuery
+}
+
+export function isQueryForGroup(query: PersonsNode | ActorsQuery): boolean {
+    return (
+        isActorsQuery(query) &&
+        isInsightActorsQuery(query.source) &&
+        isRetentionQuery(query.source.source) &&
+        query.source.source.aggregation_group_type_index !== undefined
+    )
 }
 
 export function isInsightQueryWithSeries(
@@ -237,7 +249,7 @@ export function dateRangeFor(node?: Node): DateRange | undefined {
     return undefined
 }
 
-const nodeKindToFilterProperty: Record<InsightNodeKind, InsightFilterProperty> = {
+export const nodeKindToFilterProperty: Record<InsightNodeKind, InsightFilterProperty> = {
     [NodeKind.TrendsQuery]: 'trendsFilter',
     [NodeKind.FunnelsQuery]: 'funnelsFilter',
     [NodeKind.RetentionQuery]: 'retentionFilter',
@@ -246,7 +258,7 @@ const nodeKindToFilterProperty: Record<InsightNodeKind, InsightFilterProperty> =
     [NodeKind.LifecycleQuery]: 'lifecycleFilter',
 }
 
-export function filterPropertyForQuery(node: InsightQueryNode): InsightFilterProperty {
+export function filterKeyForQuery(node: InsightQueryNode): InsightFilterProperty {
     return nodeKindToFilterProperty[node.kind]
 }
 

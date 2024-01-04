@@ -1,10 +1,11 @@
-import { kea } from 'kea'
+import { actions, connect, events, kea, listeners, path, reducers, selectors } from 'kea'
+import { LemonSelectOptions } from 'lib/lemon-ui/LemonSelect/LemonSelect'
 
-import type { sdksLogicType } from './sdksLogicType'
 import { SDK, SDKInstructionsMap } from '~/types'
+
 import { onboardingLogic } from '../onboardingLogic'
 import { allSDKs } from './allSDKs'
-import { LemonSelectOptions } from 'lib/lemon-ui/LemonSelect/LemonSelect'
+import type { sdksLogicType } from './sdksLogicType'
 
 /* 
 To add SDK instructions for your product:
@@ -27,12 +28,12 @@ const getSourceOptions = (availableSDKInstructionsMap: SDKInstructionsMap): Lemo
     return selectOptions
 }
 
-export const sdksLogic = kea<sdksLogicType>({
-    path: ['scenes', 'onboarding', 'sdks', 'sdksLogic'],
-    connect: {
+export const sdksLogic = kea<sdksLogicType>([
+    path(['scenes', 'onboarding', 'sdks', 'sdksLogic']),
+    connect({
         values: [onboardingLogic, ['productKey']],
-    },
-    actions: {
+    }),
+    actions({
         setSourceFilter: (sourceFilter: string | null) => ({ sourceFilter }),
         filterSDKs: true,
         setSDKs: (sdks: SDK[]) => ({ sdks }),
@@ -40,9 +41,10 @@ export const sdksLogic = kea<sdksLogicType>({
         setSourceOptions: (sourceOptions: LemonSelectOptions<string>) => ({ sourceOptions }),
         resetSDKs: true,
         setAvailableSDKInstructionsMap: (sdkInstructionMap: SDKInstructionsMap) => ({ sdkInstructionMap }),
-    },
-
-    reducers: {
+        setShowSideBySide: (showSideBySide: boolean) => ({ showSideBySide }),
+        setPanel: (panel: 'instructions' | 'options') => ({ panel }),
+    }),
+    reducers({
         sourceFilter: [
             null as string | null,
             {
@@ -73,8 +75,20 @@ export const sdksLogic = kea<sdksLogicType>({
                 setAvailableSDKInstructionsMap: (_, { sdkInstructionMap }) => sdkInstructionMap,
             },
         ],
-    },
-    selectors: {
+        showSideBySide: [
+            null as boolean | null,
+            {
+                setShowSideBySide: (_, { showSideBySide }) => showSideBySide,
+            },
+        ],
+        panel: [
+            'options' as 'instructions' | 'options',
+            {
+                setPanel: (_, { panel }) => panel,
+            },
+        ],
+    }),
+    selectors({
         showSourceOptionsSelect: [
             (selectors) => [selectors.sourceOptions, selectors.availableSDKInstructionsMap],
             (sourceOptions: LemonSelectOptions<string>, availableSDKInstructionsMap: SDKInstructionsMap): boolean => {
@@ -83,8 +97,8 @@ export const sdksLogic = kea<sdksLogicType>({
                 return Object.keys(availableSDKInstructionsMap).length > 5 && sourceOptions.length > 2
             },
         ],
-    },
-    listeners: ({ actions, values }) => ({
+    }),
+    listeners(({ actions, values }) => ({
         filterSDKs: () => {
             const filteredSDks: SDK[] = allSDKs
                 .filter((sdk) => {
@@ -101,7 +115,7 @@ export const sdksLogic = kea<sdksLogicType>({
             actions.filterSDKs()
         },
         setSDKs: () => {
-            if (!values.selectedSDK) {
+            if (!values.selectedSDK && values.showSideBySide == true) {
                 actions.setSelectedSDK(values.sdks?.[0] || null)
             }
         },
@@ -119,10 +133,20 @@ export const sdksLogic = kea<sdksLogicType>({
             actions.setSourceFilter(null)
             actions.setSourceOptions(getSourceOptions(values.availableSDKInstructionsMap))
         },
-    }),
-    events: ({ actions }) => ({
+        setSelectedSDK: () => {
+            if (values.selectedSDK) {
+                actions.setPanel('instructions')
+            }
+        },
+        setShowSideBySide: () => {
+            if (values.showSideBySide && !values.selectedSDK) {
+                actions.setSelectedSDK(values.sdks?.[0] || null)
+            }
+        },
+    })),
+    events(({ actions }) => ({
         afterMount: () => {
             actions.filterSDKs()
         },
-    }),
-})
+    })),
+])

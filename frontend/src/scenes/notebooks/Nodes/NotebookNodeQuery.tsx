@@ -1,5 +1,5 @@
 import { Query } from '~/queries/Query/Query'
-import { DataTableNode, InsightVizNode, NodeKind, QuerySchema } from '~/queries/schema'
+import { DataTableNode, InsightQueryNode, InsightVizNode, NodeKind, QuerySchema } from '~/queries/schema'
 import { createPostHogWidgetNode } from 'scenes/notebooks/Nodes/NodeWrapper'
 import { InsightLogicProps, InsightShortId, NotebookNodeType } from '~/types'
 import { useActions, useMountedLogic, useValues } from 'kea'
@@ -11,9 +11,10 @@ import { LemonButton } from '@posthog/lemon-ui'
 import clsx from 'clsx'
 import { urls } from 'scenes/urls'
 
-import './NotebookNodeQuery.scss'
 import { insightDataLogic } from 'scenes/insights/insightDataLogic'
 import { insightLogic } from 'scenes/insights/insightLogic'
+import { JSONContent } from '@tiptap/core'
+import { useSummarizeInsight } from 'scenes/insights/summarizeInsight'
 
 const DEFAULT_QUERY: QuerySchema = {
     kind: NodeKind.DataTableNode,
@@ -26,11 +27,15 @@ const DEFAULT_QUERY: QuerySchema = {
     },
 }
 
-const Component = ({ attributes }: NotebookNodeProps<NotebookNodeQueryAttributes>): JSX.Element | null => {
+const Component = ({
+    attributes,
+    updateAttributes,
+}: NotebookNodeProps<NotebookNodeQueryAttributes>): JSX.Element | null => {
     const { query, nodeId } = attributes
     const nodeLogic = useMountedLogic(notebookNodeLogic)
     const { expanded } = useValues(nodeLogic)
     const { setTitlePlaceholder } = useActions(nodeLogic)
+    const summarizeInsight = useSummarizeInsight()
 
     useEffect(() => {
         let title = 'Query'
@@ -43,10 +48,14 @@ const Component = ({ attributes }: NotebookNodeProps<NotebookNodeQueryAttributes
             }
         }
         if (query.kind === NodeKind.InsightVizNode) {
-            if (query.source.kind) {
-                title = query.source.kind.replace('Node', '').replace('Query', '')
-            } else {
-                title = 'Insight'
+            title = summarizeInsight(query)
+
+            if (!title) {
+                if (query.source.kind) {
+                    title = query.source.kind.replace('Node', '').replace('Query', '')
+                } else {
+                    title = 'Insight'
+                }
             }
         }
         if (query.kind === NodeKind.SavedInsightNode) {
@@ -65,6 +74,7 @@ const Component = ({ attributes }: NotebookNodeProps<NotebookNodeQueryAttributes
             modifiedQuery.full = false
             modifiedQuery.showHogQLEditor = false
             modifiedQuery.embedded = true
+            modifiedQuery.showTimings = false
         }
 
         if (NodeKind.InsightVizNode === modifiedQuery.kind || NodeKind.SavedInsightNode === modifiedQuery.kind) {
@@ -83,10 +93,20 @@ const Component = ({ attributes }: NotebookNodeProps<NotebookNodeQueryAttributes
     }
 
     return (
-        <div
-            className={clsx('flex flex-1 flex-col', NodeKind.DataTableNode === modifiedQuery.kind && 'overflow-hidden')}
-        >
-            <Query query={modifiedQuery} uniqueKey={nodeId} readOnly={true} />
+        <div className={clsx('flex flex-1 flex-col h-full')}>
+            <Query
+                // use separate keys for the settings and visualization to avoid conflicts with insightProps
+                uniqueKey={nodeId + '-component'}
+                query={modifiedQuery}
+                setQuery={(t) => {
+                    updateAttributes({
+                        query: {
+                            ...attributes.query,
+                            source: (t as DataTableNode | InsightVizNode).source,
+                        } as QuerySchema,
+                    })
+                }}
+            />
         </div>
     )
 }
@@ -125,6 +145,7 @@ export const Settings = ({
 
         if (NodeKind.InsightVizNode === modifiedQuery.kind || NodeKind.SavedInsightNode === modifiedQuery.kind) {
             modifiedQuery.showFilters = true
+            modifiedQuery.showHeader = true
             modifiedQuery.showResults = false
             modifiedQuery.embedded = true
         }
@@ -175,9 +196,9 @@ export const Settings = ({
     ) : (
         <div className="p-3">
             <Query
+                // use separate keys for the settings and visualization to avoid conflicts with insightProps
+                uniqueKey={attributes.nodeId + '-settings'}
                 query={modifiedQuery}
-                uniqueKey={attributes.nodeId}
-                readOnly={false}
                 setQuery={(t) => {
                     updateAttributes({
                         query: {
@@ -197,7 +218,7 @@ export const NotebookNodeQuery = createPostHogWidgetNode<NotebookNodeQueryAttrib
     Component,
     heightEstimate: 500,
     minHeight: 200,
-    resizeable: (attrs) => attrs.query.kind === NodeKind.DataTableNode,
+    resizeable: true,
     startExpanded: true,
     attributes: {
         query: {
@@ -206,7 +227,7 @@ export const NotebookNodeQuery = createPostHogWidgetNode<NotebookNodeQueryAttrib
     },
     href: (attrs) =>
         attrs.query.kind === NodeKind.SavedInsightNode ? urls.insightView(attrs.query.shortId) : undefined,
-    settings: Settings,
+    Settings,
     pasteOptions: {
         find: urls.insightView('(.+)' as InsightShortId),
         getAttributes: async (match) => {
@@ -232,3 +253,19 @@ export const NotebookNodeQuery = createPostHogWidgetNode<NotebookNodeQueryAttrib
         return text
     },
 })
+
+export function buildInsightVizQueryContent(source: InsightQueryNode): JSONContent {
+    return buildNodeQueryContent({ kind: NodeKind.InsightVizNode, source: source })
+}
+
+export function buildNodeQueryContent(query: QuerySchema): JSONContent {
+    return {
+        type: NotebookNodeType.Query,
+        attrs: {
+            query: query,
+            __init: {
+                showSettings: true,
+            },
+        },
+    }
+}

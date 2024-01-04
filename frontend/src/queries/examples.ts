@@ -1,7 +1,9 @@
 // This file contains example queries, used in storybook and in the /query interface.
+import { defaultDataTableColumns } from '~/queries/nodes/DataTable/utils'
 import {
     ActionsNode,
     DataTableNode,
+    DataVisualizationNode,
     EventsNode,
     EventsQuery,
     FunnelsQuery,
@@ -26,7 +28,6 @@ import {
     PropertyOperator,
     StepOrderValue,
 } from '~/types'
-import { defaultDataTableColumns } from '~/queries/nodes/DataTable/utils'
 
 const Events: EventsQuery = {
     kind: NodeKind.EventsQuery,
@@ -308,9 +309,26 @@ const HogQLRaw: HogQLQuery = {
           person.properties.email
  order by count() desc
     limit 100`,
+    explain: true,
     filters: {
         dateRange: {
             date_from: '-24h',
+        },
+    },
+}
+
+const HogQLForDataVisualization: HogQLQuery = {
+    kind: NodeKind.HogQLQuery,
+    query: `select toDate(timestamp) as timestamp, count()
+from events
+where {filters} and timestamp <= now()
+group by timestamp
+order by timestamp asc
+limit 100`,
+    explain: true,
+    filters: {
+        dateRange: {
+            date_from: '-7d',
         },
     },
 }
@@ -319,6 +337,11 @@ const HogQLTable: DataTableNode = {
     kind: NodeKind.DataTableNode,
     full: true,
     source: HogQLRaw,
+}
+
+const DataVisualization: DataVisualizationNode = {
+    kind: NodeKind.DataVisualizationNode,
+    source: HogQLForDataVisualization,
 }
 
 /* a subset of examples including only those we can show all users and that don't use HogQL */
@@ -352,6 +375,7 @@ export const examples: Record<string, Node> = {
     TimeToSeeDataJSON,
     HogQLRaw,
     HogQLTable,
+    DataVisualization,
 }
 
 export const stringifiedExamples: Record<string, string> = Object.fromEntries(

@@ -13,7 +13,10 @@ def _feature_flag_json_payload(key: str) -> Dict:
     return {
         "key": key,
         "name": "",
-        "filters": {"groups": [{"properties": [], "rollout_percentage": None}], "multivariate": None},
+        "filters": {
+            "groups": [{"properties": [], "rollout_percentage": None}],
+            "multivariate": None,
+        },
         "deleted": False,
         "active": True,
         "created_by": None,
@@ -60,12 +63,14 @@ class TestActivityLog(APIBaseTest, QueryMatchingTest):
 
             frozen_time.tick(delta=timedelta(minutes=6))
             flag_one = self.client.post(
-                f"/api/projects/{self.team.id}/feature_flags/", _feature_flag_json_payload("one")
+                f"/api/projects/{self.team.id}/feature_flags/",
+                _feature_flag_json_payload("one"),
             ).json()["id"]
 
             frozen_time.tick(delta=timedelta(minutes=6))
             flag_two = self.client.post(
-                f"/api/projects/{self.team.id}/feature_flags/", _feature_flag_json_payload("two")
+                f"/api/projects/{self.team.id}/feature_flags/",
+                _feature_flag_json_payload("two"),
             ).json()["id"]
 
             frozen_time.tick(delta=timedelta(minutes=6))
@@ -118,7 +123,8 @@ class TestActivityLog(APIBaseTest, QueryMatchingTest):
             frozen_time.tick(delta=timedelta(minutes=6))
         assert (
             self.client.patch(
-                f"/api/projects/{self.team.id}/feature_flags/{flag_one}", {"name": f"one-edited-by-{the_user.id}"}
+                f"/api/projects/{self.team.id}/feature_flags/{flag_one}",
+                {"name": f"one-edited-by-{the_user.id}"},
             ).status_code
             == status.HTTP_200_OK
         )
@@ -126,7 +132,8 @@ class TestActivityLog(APIBaseTest, QueryMatchingTest):
         frozen_time.tick(delta=timedelta(minutes=6))
         assert (
             self.client.patch(
-                f"/api/projects/{self.team.id}/feature_flags/{flag_two}", {"name": f"two-edited-by-{the_user.id}"}
+                f"/api/projects/{self.team.id}/feature_flags/{flag_two}",
+                {"name": f"two-edited-by-{the_user.id}"},
             ).status_code
             == status.HTTP_200_OK
         )
@@ -228,7 +235,7 @@ class TestActivityLog(APIBaseTest, QueryMatchingTest):
     def test_reading_notifications_marks_them_unread(self):
         self.client.force_login(self.user)
 
-        changes = self.client.get(f"/api/projects/{self.team.id}/activity_log/important_changes")
+        changes = self.client.get(f"/api/projects/{self.team.id}/activity_log/important_changes?unread=true")
         assert changes.status_code == status.HTTP_200_OK
         assert len(changes.json()["results"]) == 10
         assert changes.json()["last_read"] is None
@@ -250,17 +257,21 @@ class TestActivityLog(APIBaseTest, QueryMatchingTest):
 
         # the user can mark where they have read up to
         bookmark_response = self.client.post(
-            f"/api/projects/{self.team.id}/activity_log/bookmark_activity_notification", {"bookmark": most_recent_date}
+            f"/api/projects/{self.team.id}/activity_log/bookmark_activity_notification",
+            {"bookmark": most_recent_date},
         )
         assert bookmark_response.status_code == status.HTTP_204_NO_CONTENT
 
-        changes = self.client.get(f"/api/projects/{self.team.id}/activity_log/important_changes")
+        changes = self.client.get(f"/api/projects/{self.team.id}/activity_log/important_changes?unread=true")
         assert changes.status_code == status.HTTP_200_OK
         assert changes.json()["last_read"] == "2023-08-17T04:24:25Z"
         assert [c["unread"] for c in changes.json()["results"]] == [True, True]
 
     def _create_insight(
-        self, data: Dict[str, Any], team_id: Optional[int] = None, expected_status: int = status.HTTP_201_CREATED
+        self,
+        data: Dict[str, Any],
+        team_id: Optional[int] = None,
+        expected_status: int = status.HTTP_201_CREATED,
     ) -> Tuple[int, Dict[str, Any]]:
         if team_id is None:
             team_id = self.team.id

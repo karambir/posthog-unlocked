@@ -62,7 +62,7 @@ describe('Insights', () => {
             cy.get('.DataTable tr').should('have.length.gte', 2)
 
             insight.clickTab('TRENDS')
-            cy.get('.trends-insights-container canvas').should('exist')
+            cy.get('.TrendsInsight canvas').should('exist')
             cy.get('tr').should('have.length.gte', 2)
             cy.contains('tr', 'No insight results').should('not.exist')
 
@@ -73,13 +73,14 @@ describe('Insights', () => {
             cy.get('.DataTable tr').should('have.length.gte', 2)
 
             insight.clickTab('TRENDS')
-            cy.get('.trends-insights-container canvas').should('exist')
+            cy.get('.TrendsInsight canvas').should('exist')
             cy.get('tr').should('have.length.gte', 2)
             cy.contains('tr', 'No insight results').should('not.exist')
         })
 
         it('can open event explorer as an insight', () => {
             cy.clickNavMenu('events')
+            cy.get('[data-attr="data-table-export-menu"]').click()
             cy.get('[data-attr="open-json-editor-button"]').click()
             cy.get('[data-attr="insight-json-tab"]').should('exist')
         })

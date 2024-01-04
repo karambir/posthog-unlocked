@@ -1,10 +1,12 @@
-import { LemonLabel } from 'lib/lemon-ui/LemonLabel/LemonLabel'
-import { EntityTypes, FilterType, LocalRecordingFilters, RecordingFilters } from '~/types'
-import { useEffect, useState } from 'react'
-import equal from 'fast-deep-equal'
 import { LemonButton } from '@posthog/lemon-ui'
-import { SimpleSessionRecordingsFilters } from './SimpleSessionRecordingsFilters'
+import equal from 'fast-deep-equal'
+import { LemonLabel } from 'lib/lemon-ui/LemonLabel/LemonLabel'
+import { useEffect, useState } from 'react'
+
+import { EntityTypes, FilterType, LocalRecordingFilters, RecordingFilters } from '~/types'
+
 import { AdvancedSessionRecordingsFilters } from './AdvancedSessionRecordingsFilters'
+import { SimpleSessionRecordingsFilters } from './SimpleSessionRecordingsFilters'
 
 interface SessionRecordingsFiltersProps {
     filters: RecordingFilters
@@ -101,9 +103,11 @@ export function SessionRecordingsFilters({
                     size="small"
                     onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                     disabledReason={
-                        hasAdvancedFilters &&
-                        'You are only allowed person filters and a single pageview event to switch back to simple filters'
+                        hasAdvancedFilters
+                            ? 'You are only allowed person filters and a single pageview event (filtered by current url) to switch back to simple filters'
+                            : undefined
                     }
+                    data-attr={`session-recordings-show-${showAdvancedFilters ? 'simple' : 'advanced'}-filters`}
                 >
                     Show {showAdvancedFilters ? 'simple filters' : 'advanced filters'}
                 </LemonButton>

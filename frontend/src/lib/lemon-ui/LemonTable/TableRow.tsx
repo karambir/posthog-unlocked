@@ -1,8 +1,9 @@
-import React, { HTMLProps, useState } from 'react'
+import clsx from 'clsx'
 import { IconUnfoldLess, IconUnfoldMore } from 'lib/lemon-ui/icons'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
+import React, { HTMLProps, useState } from 'react'
+
 import { ExpandableConfig, LemonTableColumnGroup, TableCellRepresentation } from './types'
-import clsx from 'clsx'
 
 export interface TableRowProps<T extends Record<string, any>> {
     record: T
@@ -56,6 +57,7 @@ function TableRowRaw<T extends Record<string, any>>({
                 className={clsx(
                     rowClassNameDetermined,
                     rowStatusDetermined && `LemonTable__row--status-${rowStatusDetermined}`,
+                    extraProps?.onClick ? 'hover:underline cursor-pointer hover:bg-primary-highlight' : undefined,
                     className
                 )}
                 // eslint-disable-next-line react/forbid-dom-props
@@ -132,6 +134,8 @@ function TableRowRaw<T extends Record<string, any>>({
 // of a class indicating that scrollability to `table` caused the component to lag due to unneded rerendering of rows.
 export const TableRow = React.memo(TableRowRaw) as typeof TableRowRaw
 
-function isTableCellRepresentation(contents: React.ReactNode): contents is TableCellRepresentation {
+function isTableCellRepresentation(
+    contents: React.ReactNode | TableCellRepresentation
+): contents is TableCellRepresentation {
     return !!contents && typeof contents === 'object' && !React.isValidElement(contents)
 }

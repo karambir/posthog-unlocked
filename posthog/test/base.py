@@ -1,6 +1,7 @@
 import datetime as dt
 import inspect
 import re
+import resource
 import threading
 import uuid
 from contextlib import contextmanager
@@ -9,6 +10,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import freezegun
+
+# we have to import pendulum for the side effect of importing it
+# freezegun.FakeDateTime and pendulum don't play nicely otherwise
+import pendulum  # noqa F401
 import pytest
 import sqlparse
 from django.apps import apps
@@ -23,10 +28,25 @@ from posthog import rate_limit
 from posthog.clickhouse.client import sync_execute
 from posthog.clickhouse.client.connection import ch_pool
 from posthog.clickhouse.plugin_log_entries import TRUNCATE_PLUGIN_LOG_ENTRIES_TABLE_SQL
-from posthog.cloud_utils import TEST_clear_cloud_cache, TEST_clear_instance_license_cache, is_cloud
+from posthog.cloud_utils import (
+    TEST_clear_cloud_cache,
+    TEST_clear_instance_license_cache,
+    is_cloud,
+)
 from posthog.models import Dashboard, DashboardTile, Insight, Organization, Team, User
+from posthog.models.channel_type.sql import (
+    CHANNEL_DEFINITION_TABLE_SQL,
+    DROP_CHANNEL_DEFINITION_TABLE_SQL,
+    DROP_CHANNEL_DEFINITION_DICTIONARY_SQL,
+    CHANNEL_DEFINITION_DICTIONARY_SQL,
+    CHANNEL_DEFINITION_DATA_SQL,
+)
 from posthog.models.cohort.sql import TRUNCATE_COHORTPEOPLE_TABLE_SQL
-from posthog.models.event.sql import DISTRIBUTED_EVENTS_TABLE_SQL, DROP_EVENTS_TABLE_SQL, EVENTS_TABLE_SQL
+from posthog.models.event.sql import (
+    DISTRIBUTED_EVENTS_TABLE_SQL,
+    DROP_EVENTS_TABLE_SQL,
+    EVENTS_TABLE_SQL,
+)
 from posthog.models.event.util import bulk_create_events
 from posthog.models.group.sql import TRUNCATE_GROUPS_TABLE_SQL
 from posthog.models.instance_setting import get_instance_setting
@@ -67,7 +87,14 @@ def _setup_test_data(klass):
     klass.team = Team.objects.create(
         organization=klass.organization,
         api_token=klass.CONFIG_API_TOKEN,
-        test_account_filters=[{"key": "email", "value": "@posthog.com", "operator": "not_icontains", "type": "person"}],
+        test_account_filters=[
+            {
+                "key": "email",
+                "value": "@posthog.com",
+                "operator": "not_icontains",
+                "type": "person",
+            }
+        ],
         has_completed_onboarding_for={"product_analytics": True},
     )
     if klass.CONFIG_EMAIL:
@@ -107,12 +134,22 @@ class ErrorResponsesMixin:
     }
 
     def not_found_response(self, message: str = "Not found.") -> Dict[str, Optional[str]]:
-        return {"type": "invalid_request", "code": "not_found", "detail": message, "attr": None}
+        return {
+            "type": "invalid_request",
+            "code": "not_found",
+            "detail": message,
+            "attr": None,
+        }
 
     def permission_denied_response(
         self, message: str = "You do not have permission to perform this action."
     ) -> Dict[str, Optional[str]]:
-        return {"type": "authentication_error", "code": "permission_denied", "detail": message, "attr": None}
+        return {
+            "type": "authentication_error",
+            "code": "permission_denied",
+            "detail": message,
+            "attr": None,
+        }
 
     def method_not_allowed_response(self, method: str) -> Dict[str, Optional[str]]:
         return {
@@ -123,14 +160,29 @@ class ErrorResponsesMixin:
         }
 
     def unauthenticated_response(
-        self, message: str = "Authentication credentials were not provided.", code: str = "not_authenticated"
+        self,
+        message: str = "Authentication credentials were not provided.",
+        code: str = "not_authenticated",
     ) -> Dict[str, Optional[str]]:
-        return {"type": "authentication_error", "code": code, "detail": message, "attr": None}
+        return {
+            "type": "authentication_error",
+            "code": code,
+            "detail": message,
+            "attr": None,
+        }
 
     def validation_error_response(
-        self, message: str = "Malformed request", code: str = "invalid_input", attr: Optional[str] = None
+        self,
+        message: str = "Malformed request",
+        code: str = "invalid_input",
+        attr: Optional[str] = None,
     ) -> Dict[str, Optional[str]]:
-        return {"type": "validation_error", "code": code, "detail": message, "attr": attr}
+        return {
+            "type": "validation_error",
+            "code": code,
+            "detail": message,
+            "attr": attr,
+        }
 
 
 class TestMixin:
@@ -192,6 +244,41 @@ class TestMixin:
 
         if preheader:
             self.assertIn(preheader, html_message)  # type: ignore
+
+
+class MemoryLeakTestMixin:
+    MEMORY_INCREASE_PER_PARSE_LIMIT_B: int
+    """Parsing more than once can never increase memory by this much (on average)"""
+    MEMORY_INCREASE_INCREMENTAL_FACTOR_LIMIT: float
+    """Parsing cannot increase memory by more than this factor * priming's increase (on average)"""
+    MEMORY_PRIMING_RUNS_N: int
+    """How many times to run every test method to prime the heap"""
+    MEMORY_LEAK_CHECK_RUNS_N: int
+    """How many times to run every test method to check for memory leaks"""
+
+    def _callTestMethod(self, method):
+        mem_original_b = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        for _ in range(self.MEMORY_PRIMING_RUNS_N):  # Priming runs
+            method()
+        mem_primed_b = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        for _ in range(self.MEMORY_LEAK_CHECK_RUNS_N):  # Memory leak check runs
+            method()
+        mem_tested_b = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        avg_memory_priming_increase_b = (mem_primed_b - mem_original_b) / self.MEMORY_PRIMING_RUNS_N
+        avg_memory_test_increase_b = (mem_tested_b - mem_primed_b) / self.MEMORY_LEAK_CHECK_RUNS_N
+        avg_memory_increase_factor = (
+            avg_memory_test_increase_b / avg_memory_priming_increase_b if avg_memory_priming_increase_b else 0
+        )
+        self.assertLessEqual(  # type: ignore
+            avg_memory_test_increase_b,
+            self.MEMORY_INCREASE_PER_PARSE_LIMIT_B,
+            f"Possible memory leak - exceeded {self.MEMORY_INCREASE_PER_PARSE_LIMIT_B}-byte limit of incremental memory per parse",
+        )
+        self.assertLessEqual(  # type: ignore
+            avg_memory_increase_factor,
+            self.MEMORY_INCREASE_INCREMENTAL_FACTOR_LIMIT,
+            f"Possible memory leak - exceeded {self.MEMORY_INCREASE_INCREMENTAL_FACTOR_LIMIT*100:.2f}% limit of incremental memory per parse",
+        )
 
 
 class BaseTest(TestMixin, ErrorResponsesMixin, TestCase):
@@ -277,7 +364,9 @@ def stripResponse(response, remove=("action", "label", "persons_urls", "filter")
 def default_materialised_columns():
     try:
         from ee.clickhouse.materialized_columns.analyze import get_materialized_columns
-        from ee.clickhouse.materialized_columns.test.test_columns import EVENTS_TABLE_DEFAULT_MATERIALIZED_COLUMNS
+        from ee.clickhouse.materialized_columns.test.test_columns import (
+            EVENTS_TABLE_DEFAULT_MATERIALIZED_COLUMNS,
+        )
 
     except:
         # EE not available? Skip
@@ -347,7 +436,11 @@ def also_test_with_materialized_columns(
                 materialize("person", prop)
                 materialize("events", prop, table_column="person_properties")
             for group_type_index, prop in group_properties:
-                materialize("events", prop, table_column=f"group{group_type_index}_properties")  # type: ignore
+                materialize(
+                    "events",
+                    prop,
+                    table_column=f"group{group_type_index}_properties",  # type: ignore
+                )
 
             try:
                 with self.capture_select_queries() as sqls:
@@ -378,12 +471,23 @@ class QueryMatchingTest:
         if replace_all_numbers:
             query = re.sub(r"(\"?) = \d+", r"\1 = 2", query)
             query = re.sub(r"(\"?) IN \(\d+(, \d+)*\)", r"\1 IN (1, 2, 3, 4, 5 /* ... */)", query)
-            # feature flag conditions use primary keys as columns in queries, so replace those too
-            query = re.sub(r"flag_\d+_condition", r"flag_X_condition", query)
-            query = re.sub(r"flag_\d+_super_condition", r"flag_X_super_condition", query)
+            # replace "uuid" IN ('00000000-0000-4000-8000-000000000001'::uuid) effectively:
+            query = re.sub(
+                r"\"uuid\" IN \('[0-9a-f-]{36}'(::uuid)?(, '[0-9a-f-]{36}'(::uuid)?)*\)",
+                r""""uuid" IN ('00000000-0000-0000-0000-000000000000'::uuid, '00000000-0000-0000-0000-000000000001'::uuid /* ... */)\n""",
+                query,
+            )
+
         else:
             query = re.sub(r"(team|cohort)_id(\"?) = \d+", r"\1_id\2 = 2", query)
             query = re.sub(r"\d+ as (team|cohort)_id(\"?)", r"2 as \1_id\2", query)
+
+        # feature flag conditions use primary keys as columns in queries, so replace those always
+        query = re.sub(r"flag_\d+_condition", r"flag_X_condition", query)
+        query = re.sub(r"flag_\d+_super_condition", r"flag_X_super_condition", query)
+
+        # replace django cursors
+        query = re.sub(r"_django_curs_[0-9sync_]*\"", r'_django_curs_X"', query)
 
         # hog ql checks team ids differently
         query = re.sub(
@@ -425,7 +529,11 @@ class QueryMatchingTest:
             query,
         )
 
-        query = re.sub(rf"""user_id:([0-9]+) request:[a-zA-Z0-9-_]+""", r"""user_id:0 request:_snapshot_""", query)
+        query = re.sub(
+            rf"""user_id:([0-9]+) request:[a-zA-Z0-9-_]+""",
+            r"""user_id:0 request:_snapshot_""",
+            query,
+        )
 
         # ee license check has varying datetime
         # e.g. WHERE "ee_license"."valid_until" >= '2023-03-02T21:13:59.298031+00:00'::timestamptz
@@ -446,7 +554,11 @@ class QueryMatchingTest:
         query = re.sub(r"SAVEPOINT \".+\"", "SAVEPOINT _snapshot_", query)
 
         # test_formula has some values that change on every run
-        query = re.sub(r"\SELECT \[\d+, \d+] as breakdown_value", "SELECT [1, 2] as breakdown_value", query)
+        query = re.sub(
+            r"\SELECT \[\d+, \d+] as breakdown_value",
+            "SELECT [1, 2] as breakdown_value",
+            query,
+        )
         query = re.sub(
             r"SELECT distinct_id,[\n\r\s]+\d+ as value",
             "SELECT distinct_id, 1 as value",
@@ -738,6 +850,8 @@ class ClickhouseDestroyTablesMixin(BaseTest):
                 TRUNCATE_COHORTPEOPLE_TABLE_SQL,
                 TRUNCATE_PERSON_STATIC_COHORT_TABLE_SQL,
                 TRUNCATE_PLUGIN_LOG_ENTRIES_TABLE_SQL,
+                DROP_CHANNEL_DEFINITION_TABLE_SQL,
+                DROP_CHANNEL_DEFINITION_DICTIONARY_SQL,
             ]
         )
         run_clickhouse_statement_in_parallel(
@@ -746,6 +860,8 @@ class ClickhouseDestroyTablesMixin(BaseTest):
                 PERSONS_TABLE_SQL(),
                 SESSION_RECORDING_EVENTS_TABLE_SQL(),
                 SESSION_REPLAY_EVENTS_TABLE_SQL(),
+                CHANNEL_DEFINITION_TABLE_SQL(),
+                CHANNEL_DEFINITION_DICTIONARY_SQL,
             ]
         )
         run_clickhouse_statement_in_parallel(
@@ -753,6 +869,7 @@ class ClickhouseDestroyTablesMixin(BaseTest):
                 DISTRIBUTED_EVENTS_TABLE_SQL(),
                 DISTRIBUTED_SESSION_RECORDING_EVENTS_TABLE_SQL(),
                 DISTRIBUTED_SESSION_REPLAY_EVENTS_TABLE_SQL(),
+                CHANNEL_DEFINITION_DATA_SQL,
             ]
         )
 
@@ -766,6 +883,8 @@ class ClickhouseDestroyTablesMixin(BaseTest):
                 TRUNCATE_PERSON_DISTINCT_ID_TABLE_SQL,
                 DROP_SESSION_RECORDING_EVENTS_TABLE_SQL(),
                 DROP_SESSION_REPLAY_EVENTS_TABLE_SQL(),
+                DROP_CHANNEL_DEFINITION_TABLE_SQL,
+                DROP_CHANNEL_DEFINITION_DICTIONARY_SQL,
             ]
         )
 
@@ -775,6 +894,8 @@ class ClickhouseDestroyTablesMixin(BaseTest):
                 PERSONS_TABLE_SQL(),
                 SESSION_RECORDING_EVENTS_TABLE_SQL(),
                 SESSION_REPLAY_EVENTS_TABLE_SQL(),
+                CHANNEL_DEFINITION_TABLE_SQL(),
+                CHANNEL_DEFINITION_DICTIONARY_SQL,
             ]
         )
         run_clickhouse_statement_in_parallel(
@@ -782,6 +903,7 @@ class ClickhouseDestroyTablesMixin(BaseTest):
                 DISTRIBUTED_EVENTS_TABLE_SQL(),
                 DISTRIBUTED_SESSION_RECORDING_EVENTS_TABLE_SQL(),
                 DISTRIBUTED_SESSION_REPLAY_EVENTS_TABLE_SQL(),
+                CHANNEL_DEFINITION_DATA_SQL,
             ]
         )
 

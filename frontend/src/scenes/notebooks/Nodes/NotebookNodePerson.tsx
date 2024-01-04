@@ -92,7 +92,7 @@ const Component = ({ attributes }: NotebookNodeProps<NotebookNodePersonAttribute
                     )
                 })
             ) : (
-                <LemonSkeleton className="w-18 my-1" />
+                <LemonSkeleton className="h-4 w-18 my-1" />
             )}
         </div>
     )
@@ -103,7 +103,12 @@ const Component = ({ attributes }: NotebookNodeProps<NotebookNodePersonAttribute
 
     return (
         <div className="flex flex-col overflow-hidden">
-            <div className={clsx('p-4 flex-0 flex gap-2 justify-between ', !expanded && 'cursor-pointer')}>
+            <div
+                className={clsx(
+                    'p-4 flex-0 flex gap-2 justify-between min-h-20 items-center',
+                    !expanded && 'cursor-pointer'
+                )}
+            >
                 {personLoading ? (
                     <LemonSkeleton className="h-6" />
                 ) : (
@@ -128,7 +133,7 @@ const Component = ({ attributes }: NotebookNodeProps<NotebookNodePersonAttribute
 
             {expanded && (
                 <>
-                    <LemonDivider className="my-0 mx-2" />
+                    <LemonDivider className="mx-2" />
                     <div className="flex-1 p-2 overflow-y-auto">
                         <PropertiesTable
                             type={PropertyDefinitionType.Person}
@@ -152,7 +157,8 @@ export const NotebookNodePerson = createPostHogWidgetNode<NotebookNodePersonAttr
     titlePlaceholder: 'Person',
     Component,
     heightEstimate: 300,
-    minHeight: 100,
+    minHeight: '5rem',
+    startExpanded: false,
     href: (attrs) => urls.personByDistinctId(attrs.id),
     resizeable: true,
     attributes: {

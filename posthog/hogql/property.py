@@ -3,19 +3,38 @@ from typing import List, Optional, Union, cast, Literal
 
 from pydantic import BaseModel
 
-from posthog.constants import AUTOCAPTURE_EVENT, PropertyOperatorType
+from posthog.constants import (
+    AUTOCAPTURE_EVENT,
+    PropertyOperatorType,
+    TREND_FILTER_TYPE_ACTIONS,
+    TREND_FILTER_TYPE_EVENTS,
+    PAGEVIEW_EVENT,
+)
 from posthog.hogql import ast
 from posthog.hogql.base import AST
 from posthog.hogql.functions import HOGQL_AGGREGATIONS
 from posthog.hogql.errors import NotImplementedException
 from posthog.hogql.parser import parse_expr
 from posthog.hogql.visitor import TraversingVisitor, clone_expr
-from posthog.models import Action, ActionStep, Cohort, Property, Team, PropertyDefinition
+from posthog.models import (
+    Action,
+    ActionStep,
+    Cohort,
+    Property,
+    Team,
+    PropertyDefinition,
+)
 from posthog.models.event import Selector
 from posthog.models.property import PropertyGroup
 from posthog.models.property.util import build_selector_regex
 from posthog.models.property_definition import PropertyType
-from posthog.schema import PropertyOperator, PropertyGroupFilter, PropertyGroupFilterValue, FilterLogicalOperator
+from posthog.schema import (
+    PropertyOperator,
+    PropertyGroupFilter,
+    PropertyGroupFilterValue,
+    FilterLogicalOperator,
+    RetentionEntity,
+)
 
 
 def has_aggregation(expr: AST) -> bool:
@@ -101,40 +120,76 @@ def property_to_expr(
 
     if property.type == "hogql":
         return parse_expr(property.key)
-    elif property.type == "event" or property.type == "feature" or property.type == "person":
+    elif (
+        property.type == "event" or property.type == "feature" or property.type == "person" or property.type == "group"
+    ):
         if scope == "person" and property.type != "person":
             raise NotImplementedException(
                 f"The '{property.type}' property filter only works in 'event' scope, not in '{scope}' scope"
             )
         operator = cast(Optional[PropertyOperator], property.operator) or PropertyOperator.exact
         value = property.value
+
+        if property.type == "person" and scope != "person":
+            chain = ["person", "properties"]
+        elif property.type == "group":
+            chain = [f"group_{property.group_type_index}", "properties"]
+        else:
+            chain = ["properties"]
+        field = ast.Field(chain=chain + [property.key])
+
         if isinstance(value, list):
             if len(value) == 0:
                 return ast.Constant(value=True)
             elif len(value) == 1:
                 value = value[0]
             else:
+                # Using an AND here instead of `in()` or `notIn()`, due to Clickhouses poor handling of `null` values
                 exprs = [
                     property_to_expr(
-                        Property(type=property.type, key=property.key, operator=property.operator, value=v), team, scope
+                        Property(
+                            type=property.type,
+                            key=property.key,
+                            operator=property.operator,
+                            value=v,
+                        ),
+                        team,
+                        scope,
                     )
                     for v in value
                 ]
                 if (
-                    operator == PropertyOperator.is_not
-                    or operator == PropertyOperator.not_icontains
+                    operator == PropertyOperator.not_icontains
                     or operator == PropertyOperator.not_regex
+                    or operator == PropertyOperator.is_not
                 ):
                     return ast.And(exprs=exprs)
                 return ast.Or(exprs=exprs)
 
-        chain = ["person", "properties"] if property.type == "person" and scope != "person" else ["properties"]
-        field = ast.Field(chain=chain + [property.key])
+        properties_field = ast.Field(chain=chain)
 
         if operator == PropertyOperator.is_set:
-            return ast.CompareOperation(op=ast.CompareOperationOp.NotEq, left=field, right=ast.Constant(value=None))
+            return ast.CompareOperation(
+                op=ast.CompareOperationOp.NotEq,
+                left=field,
+                right=ast.Constant(value=None),
+            )
         elif operator == PropertyOperator.is_not_set:
-            return ast.CompareOperation(op=ast.CompareOperationOp.Eq, left=field, right=ast.Constant(value=None))
+            return ast.Or(
+                exprs=[
+                    ast.CompareOperation(
+                        op=ast.CompareOperationOp.Eq,
+                        left=field,
+                        right=ast.Constant(value=None),
+                    ),
+                    ast.Not(
+                        expr=ast.Call(
+                            name="JSONHas",
+                            args=[properties_field, ast.Constant(value=property.key)],
+                        )
+                    ),
+                ]
+            )
         elif operator == PropertyOperator.icontains:
             return ast.CompareOperation(
                 op=ast.CompareOperationOp.ILike,
@@ -150,7 +205,10 @@ def property_to_expr(
         elif operator == PropertyOperator.regex:
             return ast.Call(name="match", args=[field, ast.Constant(value=value)])
         elif operator == PropertyOperator.not_regex:
-            return ast.Call(name="not", args=[ast.Call(name="match", args=[field, ast.Constant(value=value)])])
+            return ast.Call(
+                name="not",
+                args=[ast.Call(name="match", args=[field, ast.Constant(value=value)])],
+            )
         elif operator == PropertyOperator.exact or operator == PropertyOperator.is_date_exact:
             op = ast.CompareOperationOp.Eq
         elif operator == PropertyOperator.is_not:
@@ -201,7 +259,14 @@ def property_to_expr(
             else:
                 exprs = [
                     property_to_expr(
-                        Property(type=property.type, key=property.key, operator=property.operator, value=v), team, scope
+                        Property(
+                            type=property.type,
+                            key=property.key,
+                            operator=property.operator,
+                            value=v,
+                        ),
+                        team,
+                        scope,
                     )
                     for v in value
                 ]
@@ -240,9 +305,11 @@ def property_to_expr(
             right=ast.Constant(value=cohort.pk),
         )
 
-    # TODO: Add support for these types "group", "recording", "behavioral", and "session" types
+    # TODO: Add support for these types "recording", "behavioral", and "session" types
 
-    raise NotImplementedException(f"property_to_expr not implemented for filter type {type(property).__name__}")
+    raise NotImplementedException(
+        f"property_to_expr not implemented for filter type {type(property).__name__} and {property.type}"
+    )
 
 
 def action_to_expr(action: Action) -> ast.Expr:
@@ -281,11 +348,20 @@ def action_to_expr(action: Action) -> ast.Expr:
 
         if step.url:
             if step.url_matching == ActionStep.EXACT:
-                expr = parse_expr("properties.$current_url = {url}", {"url": ast.Constant(value=step.url)})
+                expr = parse_expr(
+                    "properties.$current_url = {url}",
+                    {"url": ast.Constant(value=step.url)},
+                )
             elif step.url_matching == ActionStep.REGEX:
-                expr = parse_expr("properties.$current_url =~ {regex}", {"regex": ast.Constant(value=step.url)})
+                expr = parse_expr(
+                    "properties.$current_url =~ {regex}",
+                    {"regex": ast.Constant(value=step.url)},
+                )
             else:
-                expr = parse_expr("properties.$current_url like {url}", {"url": ast.Constant(value=f"%{step.url}%")})
+                expr = parse_expr(
+                    "properties.$current_url like {url}",
+                    {"url": ast.Constant(value=f"%{step.url}%")},
+                )
             exprs.append(expr)
 
         if step.properties:
@@ -302,6 +378,27 @@ def action_to_expr(action: Action) -> ast.Expr:
         return or_queries[0]
     else:
         return ast.Or(exprs=or_queries)
+
+
+def entity_to_expr(entity: RetentionEntity, default_event=PAGEVIEW_EVENT) -> ast.Expr:
+    if entity.type == TREND_FILTER_TYPE_ACTIONS and entity.id is not None:
+        action = Action.objects.get(pk=entity.id)
+        return action_to_expr(action)
+    elif entity.type == TREND_FILTER_TYPE_EVENTS:
+        if entity.id is None:
+            return ast.Constant(value=True)
+
+        return ast.CompareOperation(
+            op=ast.CompareOperationOp.Eq,
+            left=ast.Field(chain=["events", "event"]),
+            right=ast.Constant(value=entity.id),
+        )
+
+    return ast.CompareOperation(
+        op=ast.CompareOperationOp.Eq,
+        left=ast.Field(chain=["events", "event"]),
+        right=ast.Constant(value=default_event),
+    )
 
 
 def element_chain_key_filter(key: str, text: str, operator: PropertyOperator):

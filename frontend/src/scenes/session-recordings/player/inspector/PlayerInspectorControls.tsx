@@ -1,21 +1,23 @@
-import { LemonButton, LemonInput, LemonSelect, LemonCheckbox } from '@posthog/lemon-ui'
-import { Tooltip } from 'antd'
-import { useValues, useActions } from 'kea'
+import { LemonButton, LemonCheckbox, LemonInput, LemonSelect, Tooltip } from '@posthog/lemon-ui'
+import { useActions, useValues } from 'kea'
 import {
-    IconInfo,
-    IconSchedule,
-    IconPlayCircle,
     IconGauge,
+    IconInfo,
+    IconPause,
+    IconPlayCircle,
+    IconSchedule,
     IconTerminal,
     IconUnverifiedEvent,
-    IconPause,
 } from 'lib/lemon-ui/icons'
 import { Spinner } from 'lib/lemon-ui/Spinner/Spinner'
 import { capitalizeFirstLetter } from 'lib/utils'
-import { SessionRecordingPlayerTab } from '~/types'
 import { IconWindow } from 'scenes/session-recordings/player/icons'
+
+import { SessionRecordingPlayerTab } from '~/types'
+
 import { playerSettingsLogic } from '../playerSettingsLogic'
-import { SessionRecordingPlayerMode, sessionRecordingPlayerLogic } from '../sessionRecordingPlayerLogic'
+import { sessionRecordingPlayerLogic, SessionRecordingPlayerMode } from '../sessionRecordingPlayerLogic'
+import { InspectorSearchInfo } from './components/InspectorSearchInfo'
 import { playerInspectorLogic } from './playerInspectorLogic'
 
 const TabToIcon = {
@@ -88,6 +90,11 @@ export function PlayerInspectorControls(): JSX.Element {
                         type="search"
                         value={searchQuery}
                         fullWidth
+                        suffix={
+                            <Tooltip title={<InspectorSearchInfo />}>
+                                <IconInfo />
+                            </Tooltip>
+                        }
                     />
                 </div>
                 {windowIds.length > 1 ? (
@@ -166,7 +173,8 @@ export function PlayerInspectorControls(): JSX.Element {
                         size="small"
                         noPadding
                         status="primary-alt"
-                        type={syncScroll ? 'primary' : 'tertiary'}
+                        active={syncScroll}
+                        type="tertiary"
                         onClick={() => {
                             // If the user has syncScrolling on but it is paused due to interacting with the Inspector, we want to resume it
                             if (syncScroll && syncScrollingPaused) {

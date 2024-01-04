@@ -6,6 +6,7 @@ import { ClickHouseTimestamp, Hub, Person, PropertyOperator, PropertyUpdateOpera
 import { DB, GroupId } from '../../src/utils/db/db'
 import { DependencyUnavailableError } from '../../src/utils/db/error'
 import { createHub } from '../../src/utils/db/hub'
+import * as dbMetrics from '../../src/utils/db/metrics'
 import { PostgresRouter, PostgresUse } from '../../src/utils/db/postgres'
 import { generateKafkaPersonUpdateMessage } from '../../src/utils/db/utils'
 import { RaceConditionError, UUIDT } from '../../src/utils/utils'
@@ -651,7 +652,6 @@ describe('DB', () => {
         beforeEach(() => {
             jest.spyOn(db, 'fetchGroup')
             jest.spyOn(db, 'redisGet')
-            db.statsd = { increment: jest.fn(), timing: jest.fn() } as any
         })
 
         describe('one group', () => {
@@ -700,10 +700,11 @@ describe('DB', () => {
                 expect(db.fetchGroup).toHaveBeenCalled()
             })
 
-            it('triggers a statsd metric if the data doesnt exist in Postgres or Redis', async () => {
+            it('triggers a metric if the data doesnt exist in Postgres or Redis', async () => {
+                const groupDataMissingCounterSpy = jest.spyOn(dbMetrics.groupDataMissingCounter, 'inc')
                 await db.getGroupsColumns(2, [[0, 'unknown_key']])
 
-                expect(db.statsd?.increment).toHaveBeenLastCalledWith('groups_data_missing_entirely')
+                expect(groupDataMissingCounterSpy).toHaveBeenCalledTimes(1)
             })
         })
 
@@ -845,7 +846,7 @@ describe('DB', () => {
         })
     })
 
-    describe('addFeatureFlagHashKeysForMergedPerson()', () => {
+    describe('updateCohortsAndFeatureFlagsForMerge()', () => {
         let team: Team
         let sourcePersonID: Person['id']
         let targetPersonID: Person['id']
@@ -889,7 +890,7 @@ describe('DB', () => {
         })
 
         it("doesn't fail on empty data", async () => {
-            await db.addFeatureFlagHashKeysForMergedPerson(team.id, sourcePersonID, targetPersonID)
+            await db.updateCohortsAndFeatureFlagsForMerge(team.id, sourcePersonID, targetPersonID)
         })
 
         it('updates all valid keys when target person had no overrides', async () => {
@@ -906,7 +907,7 @@ describe('DB', () => {
                 hash_key: 'override_value_for_beta_feature',
             })
 
-            await db.addFeatureFlagHashKeysForMergedPerson(team.id, sourcePersonID, targetPersonID)
+            await db.updateCohortsAndFeatureFlagsForMerge(team.id, sourcePersonID, targetPersonID)
 
             const result = await getAllHashKeyOverrides()
 
@@ -947,7 +948,7 @@ describe('DB', () => {
                 hash_key: 'existing_override_value_for_beta_feature',
             })
 
-            await db.addFeatureFlagHashKeysForMergedPerson(team.id, sourcePersonID, targetPersonID)
+            await db.updateCohortsAndFeatureFlagsForMerge(team.id, sourcePersonID, targetPersonID)
 
             const result = await getAllHashKeyOverrides()
 
@@ -982,7 +983,7 @@ describe('DB', () => {
                 hash_key: 'override_value_for_beta_feature',
             })
 
-            await db.addFeatureFlagHashKeysForMergedPerson(team.id, sourcePersonID, targetPersonID)
+            await db.updateCohortsAndFeatureFlagsForMerge(team.id, sourcePersonID, targetPersonID)
 
             const result = await getAllHashKeyOverrides()
 

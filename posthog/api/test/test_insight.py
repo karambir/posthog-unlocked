@@ -76,6 +76,7 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
             "uuid": str(self.user.uuid),
             "distinct_id": self.user.distinct_id,
             "first_name": self.user.first_name,
+            "last_name": self.user.last_name,
             "email": self.user.email,
             "is_email_verified": None,
         }
@@ -84,6 +85,7 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
             "uuid": str(alt_user.uuid),
             "distinct_id": alt_user.distinct_id,
             "first_name": alt_user.first_name,
+            "last_name": alt_user.last_name,
             "email": alt_user.email,
             "is_email_verified": None,
         }
@@ -358,7 +360,13 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
 
         # adding more insights doesn't change the query count
         self.assertEqual(
-            [FuzzyInt(10, 11), FuzzyInt(10, 11), FuzzyInt(10, 11), FuzzyInt(10, 11), FuzzyInt(10, 11)],
+            [
+                FuzzyInt(10, 11),
+                FuzzyInt(10, 11),
+                FuzzyInt(10, 11),
+                FuzzyInt(10, 11),
+                FuzzyInt(10, 11),
+            ],
             query_counts,
             f"received query counts\n\n{query_counts}",
         )
@@ -584,7 +592,9 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
 
         # accidentally include a deleted dashboard
         _, update_response = self.dashboard_api.update_insight(
-            insight_id, {"dashboards": [deleted_dashboard_id]}, expected_status=status.HTTP_400_BAD_REQUEST
+            insight_id,
+            {"dashboards": [deleted_dashboard_id]},
+            expected_status=status.HTTP_400_BAD_REQUEST,
         )
 
         # confirm no updates happened
@@ -1408,7 +1418,12 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
             f"/api/projects/{self.team.id}/insights/path",
             data={
                 "properties": json.dumps(
-                    [{"key": "properties.test == 'val' and person.properties.$os == 'Mac'", "type": "hogql"}]
+                    [
+                        {
+                            "key": "properties.test == 'val' and person.properties.$os == 'Mac'",
+                            "type": "hogql",
+                        }
+                    ]
                 )
             },
         ).json()
@@ -1418,7 +1433,12 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
             f"/api/projects/{self.team.id}/insights/path",
             data={
                 "properties": json.dumps(
-                    [{"key": "properties.test == 'val' and person.properties.$os == 'Windows'", "type": "hogql"}]
+                    [
+                        {
+                            "key": "properties.test == 'val' and person.properties.$os == 'Windows'",
+                            "type": "hogql",
+                        }
+                    ]
                 )
             },
         ).json()
@@ -1549,24 +1569,40 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
             f"/api/projects/{self.team.id}/insights/?sharing_access_token={sharing_configuration.access_token}",
         )
 
-        self.assertEqual(response_invalid_token_retrieve.status_code, 403, response_invalid_token_retrieve.json())
+        self.assertEqual(
+            response_invalid_token_retrieve.status_code,
+            403,
+            response_invalid_token_retrieve.json(),
+        )
         self.assertEqual(
             response_invalid_token_retrieve.json(),
             self.unauthenticated_response("Sharing access token is invalid.", "authentication_failed"),
         )
-        self.assertEqual(response_incorrect_token_retrieve.status_code, 404, response_incorrect_token_retrieve.json())
+        self.assertEqual(
+            response_incorrect_token_retrieve.status_code,
+            404,
+            response_incorrect_token_retrieve.json(),
+        )
         self.assertEqual(
             response_incorrect_token_retrieve.json(),
             self.not_found_response(),
         )
-        self.assertEqual(response_correct_token_retrieve.status_code, 200, response_correct_token_retrieve.json())
+        self.assertEqual(
+            response_correct_token_retrieve.status_code,
+            200,
+            response_correct_token_retrieve.json(),
+        )
         self.assertDictContainsSubset(
             {
                 "name": "Foobar",
             },
             response_correct_token_retrieve.json(),
         )
-        self.assertEqual(response_correct_token_list.status_code, 200, response_correct_token_list.json())
+        self.assertEqual(
+            response_correct_token_list.status_code,
+            200,
+            response_correct_token_list.json(),
+        )
         # abcdfghi not returned as it's not related to this sharing configuration
         self.assertEqual(response_correct_token_list.json()["count"], 1)
         self.assertDictContainsSubset(
@@ -1622,7 +1658,8 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         self.assertEqual(
             response_retrieve.json(),
             self.unauthenticated_response(
-                "Sharing access token can only be used for GET requests.", "authentication_failed"
+                "Sharing access token can only be used for GET requests.",
+                "authentication_failed",
             ),
         )
 
@@ -1634,7 +1671,10 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
             short_id="12345678",
         )
         sharing_configuration = SharingConfiguration.objects.create(
-            team=self.team, insight=insight, enabled=False, access_token="xyz"  # DISABLED!
+            team=self.team,
+            insight=insight,
+            enabled=False,
+            access_token="xyz",  # DISABLED!
         )
 
         response_retrieve = self.client.get(
@@ -1708,16 +1748,28 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
             f"/api/projects/{self.team.id}/insights/?sharing_access_token={sharing_configuration.access_token}",
         )
 
-        self.assertEqual(response_incorrect_token_retrieve.status_code, 403, response_incorrect_token_retrieve.json())
+        self.assertEqual(
+            response_incorrect_token_retrieve.status_code,
+            403,
+            response_incorrect_token_retrieve.json(),
+        )
         self.assertEqual(
             response_incorrect_token_retrieve.json(),
             self.unauthenticated_response("Sharing access token is invalid.", "authentication_failed"),
         )
-        self.assertEqual(response_correct_token_retrieve.status_code, 200, response_correct_token_retrieve.json())
+        self.assertEqual(
+            response_correct_token_retrieve.status_code,
+            200,
+            response_correct_token_retrieve.json(),
+        )
         self.assertDictContainsSubset({"name": "Foobar"}, response_correct_token_retrieve.json())
         # Below checks that the deleted insight and non-deleted insight whose tile is deleted are not be retrievable
         # Also, the text tile should not affect things
-        self.assertEqual(response_correct_token_list.status_code, 200, response_correct_token_list.json())
+        self.assertEqual(
+            response_correct_token_list.status_code,
+            200,
+            response_correct_token_list.json(),
+        )
         self.assertEqual(response_correct_token_list.json()["count"], 1)
 
     def test_logged_out_user_cannot_retrieve_insight_with_correct_deleted_dashboard_sharing_access_token(self) -> None:
@@ -1738,7 +1790,11 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
             f"/api/projects/{self.team.id}/insights/?sharing_access_token={sharing_configuration.access_token}",
         )
 
-        self.assertEqual(response_correct_token_list.status_code, 200, response_correct_token_list.json())
+        self.assertEqual(
+            response_correct_token_list.status_code,
+            200,
+            response_correct_token_list.json(),
+        )
         self.assertEqual(response_correct_token_list.json()["count"], 0)
 
     def test_insight_trends_csv(self) -> None:
@@ -1928,7 +1984,14 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                             "properties.$lib",
                             "timestamp",
                         ],
-                        "properties": [{"type": "event", "key": "$browser", "operator": "exact", "value": "Chrome"}],
+                        "properties": [
+                            {
+                                "type": "event",
+                                "key": "$browser",
+                                "operator": "exact",
+                                "value": "Chrome",
+                            }
+                        ],
                         "limit": 100,
                     },
                 },
@@ -1962,7 +2025,14 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                             "properties.$lib",
                             "timestamp",
                         ],
-                        "properties": [{"type": "event", "key": "$browser", "operator": "exact", "value": "Chrome"}],
+                        "properties": [
+                            {
+                                "type": "event",
+                                "key": "$browser",
+                                "operator": "exact",
+                                "value": "Chrome",
+                            }
+                        ],
                         "limit": 100,
                     },
                 },
@@ -2157,7 +2227,10 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
 
         self.client.patch(
             f"/api/projects/{self.team.id}/insights/{insight_id}",
-            {"deleted": True, "name": "an insight"},  # This request should work also if other fields are provided
+            {
+                "deleted": True,
+                "name": "an insight",
+            },  # This request should work also if other fields are provided
         )
 
         self.assertEqual(
@@ -2167,7 +2240,10 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
 
         update_response = self.client.patch(
             f"/api/projects/{self.team.id}/insights/{insight_id}",
-            {"deleted": False, "name": "an insight"},  # This request should work also if other fields are provided
+            {
+                "deleted": False,
+                "name": "an insight",
+            },  # This request should work also if other fields are provided
         )
         self.assertEqual(update_response.status_code, status.HTTP_200_OK)
 
@@ -2201,7 +2277,8 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         )
 
         other_update_response = self.client.patch(
-            f"/api/projects/{self.team.id}/insights/{other_insight.id}", {"deleted": False}
+            f"/api/projects/{self.team.id}/insights/{other_insight.id}",
+            {"deleted": False},
         )
         self.assertEqual(other_update_response.status_code, status.HTTP_404_NOT_FOUND)
 
@@ -2244,7 +2321,12 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         _create_person(team=self.team, distinct_ids=["1"], properties={"fish": "there is no fish"})
         with freeze_time("2012-01-14T03:21:34.000Z"):
             for i in range(25):
-                _create_event(team=self.team, event="$pageview", distinct_id="1", properties={"int_value": i})
+                _create_event(
+                    team=self.team,
+                    event="$pageview",
+                    distinct_id="1",
+                    properties={"int_value": i},
+                )
         with freeze_time("2012-01-15T04:01:34.000Z"):
             # 25 events total
             response = self.client.get(
@@ -2261,8 +2343,14 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                     "events": json.dumps([{"id": "$pageview"}]),
                     "properties": json.dumps(
                         [
-                            {"key": "toInt(properties.int_value) > 10 and 'bla' != 'a%sd'", "type": "hogql"},
-                            {"key": "like(person.properties.fish, '%fish%')", "type": "hogql"},
+                            {
+                                "key": "toInt(properties.int_value) > 10 and 'bla' != 'a%sd'",
+                                "type": "hogql",
+                            },
+                            {
+                                "key": "like(person.properties.fish, '%fish%')",
+                                "type": "hogql",
+                            },
                         ]
                     ),
                 },
@@ -2283,7 +2371,11 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                     ),
                 },
             )
-            self.assertEqual(response_placeholder.status_code, status.HTTP_400_BAD_REQUEST, response_placeholder.json())
+            self.assertEqual(
+                response_placeholder.status_code,
+                status.HTTP_400_BAD_REQUEST,
+                response_placeholder.json(),
+            )
             self.assertEqual(
                 response_placeholder.json(),
                 self.validation_error_response("Placeholders, such as {team_id}, are not supported in this context"),
@@ -2295,7 +2387,12 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         _create_person(team=self.team, distinct_ids=["1"], properties={"fish": "there is no fish"})
         with freeze_time("2012-01-14T03:21:34.000Z"):
             for i in range(25):
-                _create_event(team=self.team, event="$pageview", distinct_id="1", properties={"int_value": i})
+                _create_event(
+                    team=self.team,
+                    event="$pageview",
+                    distinct_id="1",
+                    properties={"int_value": i},
+                )
         with freeze_time("2012-01-15T04:01:34.000Z"):
             # test trends local property filter
             response = self.client.get(
@@ -2311,7 +2408,10 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                                             "key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'",
                                             "type": "hogql",
                                         },
-                                        {"key": "like(person.properties.fish, '%fish%')", "type": "hogql"},
+                                        {
+                                            "key": "like(person.properties.fish, '%fish%')",
+                                            "type": "hogql",
+                                        },
                                     ]
                                 ),
                             }
@@ -2328,7 +2428,12 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         _create_person(team=self.team, distinct_ids=["1"], properties={"fish": "there is no fish"})
         with freeze_time("2012-01-14T03:21:34.000Z"):
             for i in range(25):
-                _create_event(team=self.team, event="$pageview", distinct_id="1", properties={"int_value": i})
+                _create_event(
+                    team=self.team,
+                    event="$pageview",
+                    distinct_id="1",
+                    properties={"int_value": i},
+                )
         with freeze_time("2012-01-15T04:01:34.000Z"):
             # test trends breakdown
             response = self.client.get(
@@ -2349,9 +2454,23 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
     @also_test_with_materialized_columns(event_properties=["int_value"], person_properties=["fish"])
     def test_insight_funnels_hogql_global_filters(self) -> None:
         with freeze_time("2012-01-15T04:01:34.000Z"):
-            _create_person(team=self.team, distinct_ids=["1"], properties={"fish": "there is no fish"})
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"int_value": 1})
-            _create_event(team=self.team, event="user did things", distinct_id="1", properties={"int_value": 20})
+            _create_person(
+                team=self.team,
+                distinct_ids=["1"],
+                properties={"fish": "there is no fish"},
+            )
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"int_value": 1},
+            )
+            _create_event(
+                team=self.team,
+                event="user did things",
+                distinct_id="1",
+                properties={"int_value": 20},
+            )
             response = self.client.post(
                 f"/api/projects/{self.team.id}/insights/funnel/",
                 {
@@ -2361,8 +2480,14 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                     ],
                     "properties": json.dumps(
                         [
-                            {"key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'", "type": "hogql"},
-                            {"key": "like(person.properties.fish, '%fish%')", "type": "hogql"},
+                            {
+                                "key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'",
+                                "type": "hogql",
+                            },
+                            {
+                                "key": "like(person.properties.fish, '%fish%')",
+                                "type": "hogql",
+                            },
                         ]
                     ),
                     "funnel_window_days": 14,
@@ -2381,9 +2506,23 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
     @also_test_with_materialized_columns(event_properties=["int_value"], person_properties=["fish"])
     def test_insight_funnels_hogql_local_filters(self) -> None:
         with freeze_time("2012-01-15T04:01:34.000Z"):
-            _create_person(team=self.team, distinct_ids=["1"], properties={"fish": "there is no fish"})
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"int_value": 1})
-            _create_event(team=self.team, event="user did things", distinct_id="1", properties={"int_value": 20})
+            _create_person(
+                team=self.team,
+                distinct_ids=["1"],
+                properties={"fish": "there is no fish"},
+            )
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"int_value": 1},
+            )
+            _create_event(
+                team=self.team,
+                event="user did things",
+                distinct_id="1",
+                properties={"int_value": 20},
+            )
             response = self.client.post(
                 f"/api/projects/{self.team.id}/insights/funnel/",
                 {
@@ -2394,8 +2533,14 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                             "order": 0,
                             "properties": json.dumps(
                                 [
-                                    {"key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'", "type": "hogql"},
-                                    {"key": "like(person.properties.fish, '%fish%')", "type": "hogql"},
+                                    {
+                                        "key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'",
+                                        "type": "hogql",
+                                    },
+                                    {
+                                        "key": "like(person.properties.fish, '%fish%')",
+                                        "type": "hogql",
+                                    },
                                 ]
                             ),
                         },
@@ -2405,8 +2550,14 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                             "order": 1,
                             "properties": json.dumps(
                                 [
-                                    {"key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'", "type": "hogql"},
-                                    {"key": "like(person.properties.fish, '%fish%')", "type": "hogql"},
+                                    {
+                                        "key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'",
+                                        "type": "hogql",
+                                    },
+                                    {
+                                        "key": "like(person.properties.fish, '%fish%')",
+                                        "type": "hogql",
+                                    },
                                 ]
                             ),
                         },
@@ -2427,9 +2578,23 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
     @also_test_with_materialized_columns(event_properties=["int_value"], person_properties=["fish"])
     def test_insight_funnels_hogql_breakdown(self) -> None:
         with freeze_time("2012-01-15T04:01:34.000Z"):
-            _create_person(team=self.team, distinct_ids=["1"], properties={"fish": "there is no fish"})
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"int_value": 1})
-            _create_event(team=self.team, event="user did things", distinct_id="1", properties={"int_value": 20})
+            _create_person(
+                team=self.team,
+                distinct_ids=["1"],
+                properties={"fish": "there is no fish"},
+            )
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"int_value": 1},
+            )
+            _create_event(
+                team=self.team,
+                event="user did things",
+                distinct_id="1",
+                properties={"int_value": 20},
+            )
             response = self.client.post(
                 f"/api/projects/{self.team.id}/insights/funnel/",
                 {
@@ -2441,7 +2606,10 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                     ],
                     "properties": json.dumps(
                         [
-                            {"key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'", "type": "hogql"},
+                            {
+                                "key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'",
+                                "type": "hogql",
+                            },
                         ]
                     ),
                     "funnel_window_days": 14,
@@ -2465,9 +2633,23 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
     @also_test_with_materialized_columns(event_properties=["int_value"], person_properties=["fish"])
     def test_insight_funnels_hogql_breakdown_single(self) -> None:
         with freeze_time("2012-01-15T04:01:34.000Z"):
-            _create_person(team=self.team, distinct_ids=["1"], properties={"fish": "there is no fish"})
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"int_value": 1})
-            _create_event(team=self.team, event="user did things", distinct_id="1", properties={"int_value": 20})
+            _create_person(
+                team=self.team,
+                distinct_ids=["1"],
+                properties={"fish": "there is no fish"},
+            )
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"int_value": 1},
+            )
+            _create_event(
+                team=self.team,
+                event="user did things",
+                distinct_id="1",
+                properties={"int_value": 20},
+            )
             response = self.client.post(
                 f"/api/projects/{self.team.id}/insights/funnel/",
                 {
@@ -2479,7 +2661,10 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                     ],
                     "properties": json.dumps(
                         [
-                            {"key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'", "type": "hogql"},
+                            {
+                                "key": "toInt(properties.int_value) < 10 and 'bla' != 'a%sd'",
+                                "type": "hogql",
+                            },
                         ]
                     ),
                     "funnel_window_days": 14,
@@ -2502,21 +2687,49 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
     def test_insight_funnels_hogql_aggregating_steps(self) -> None:
         with freeze_time("2012-01-15T04:01:34.000Z"):
             _create_person(team=self.team, distinct_ids=["1"], properties={"int_value": 1})
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"$browser": "Chrome"})
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"$browser": "Firefox"})
-            _create_event(team=self.team, event="user did things", distinct_id="1", properties={"$browser": "Chrome"})
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"$browser": "Chrome"},
+            )
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"$browser": "Firefox"},
+            )
+            _create_event(
+                team=self.team,
+                event="user did things",
+                distinct_id="1",
+                properties={"$browser": "Chrome"},
+            )
             response = self.client.post(
                 f"/api/projects/{self.team.id}/insights/funnel/",
                 {
                     "insight": "FUNNELS",
                     "entity_type": "events",
                     "events": [
-                        {"id": "user signed up", "type": "events", "order": 0, "math": "total"},
-                        {"id": "user did things", "type": "events", "order": 1, "math": "total"},
+                        {
+                            "id": "user signed up",
+                            "type": "events",
+                            "order": 0,
+                            "math": "total",
+                        },
+                        {
+                            "id": "user did things",
+                            "type": "events",
+                            "order": 1,
+                            "math": "total",
+                        },
                     ],
                     "properties": json.dumps(
                         [
-                            {"key": "toInt(person.properties.int_value) < 10 and 'bla' != 'a%sd'", "type": "hogql"},
+                            {
+                                "key": "toInt(person.properties.int_value) < 10 and 'bla' != 'a%sd'",
+                                "type": "hogql",
+                            },
                         ]
                     ),
                     "funnel_aggregate_by_hogql": "properties.$browser",
@@ -2535,11 +2748,26 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
     def test_insight_funnels_hogql_aggregating_time_to_convert(self) -> None:
         with freeze_time("2012-01-15T04:01:34.000Z"):
             _create_person(team=self.team, distinct_ids=["1"], properties={"int_value": 1})
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"$browser": "Chrome"})
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"$browser": "Chrome"},
+            )
         with freeze_time("2012-01-15T04:01:36.500Z"):
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"$browser": "Firefox"})
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"$browser": "Firefox"},
+            )
         with freeze_time("2012-01-15T04:01:38.200Z"):
-            _create_event(team=self.team, event="user did things", distinct_id="1", properties={"$browser": "Chrome"})
+            _create_event(
+                team=self.team,
+                event="user did things",
+                distinct_id="1",
+                properties={"$browser": "Chrome"},
+            )
         with freeze_time("2012-01-16T04:01:38.200Z"):
             response = self.client.post(
                 f"/api/projects/{self.team.id}/insights/funnel/",
@@ -2547,12 +2775,25 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                     "insight": "FUNNELS",
                     "entity_type": "events",
                     "events": [
-                        {"id": "user signed up", "type": "events", "order": 0, "math": "total"},
-                        {"id": "user did things", "type": "events", "order": 1, "math": "total"},
+                        {
+                            "id": "user signed up",
+                            "type": "events",
+                            "order": 0,
+                            "math": "total",
+                        },
+                        {
+                            "id": "user did things",
+                            "type": "events",
+                            "order": 1,
+                            "math": "total",
+                        },
                     ],
                     "properties": json.dumps(
                         [
-                            {"key": "toInt(person.properties.int_value) < 10 and 'bla' != 'a%sd'", "type": "hogql"},
+                            {
+                                "key": "toInt(person.properties.int_value) < 10 and 'bla' != 'a%sd'",
+                                "type": "hogql",
+                            },
                         ]
                     ),
                     "funnel_aggregate_by_hogql": "properties.$browser",
@@ -2570,11 +2811,26 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
     def test_insight_funnels_hogql_aggregating_trends(self) -> None:
         with freeze_time("2012-01-15T04:01:34.000Z"):
             _create_person(team=self.team, distinct_ids=["1"], properties={"int_value": 1})
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"$browser": "Chrome"})
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"$browser": "Chrome"},
+            )
         with freeze_time("2012-01-15T04:01:36.500Z"):
-            _create_event(team=self.team, event="user signed up", distinct_id="1", properties={"$browser": "Firefox"})
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id="1",
+                properties={"$browser": "Firefox"},
+            )
         with freeze_time("2012-01-15T04:01:38.200Z"):
-            _create_event(team=self.team, event="user did things", distinct_id="1", properties={"$browser": "Chrome"})
+            _create_event(
+                team=self.team,
+                event="user did things",
+                distinct_id="1",
+                properties={"$browser": "Chrome"},
+            )
         with freeze_time("2012-01-16T04:01:38.200Z"):
             response = self.client.post(
                 f"/api/projects/{self.team.id}/insights/funnel/",
@@ -2587,7 +2843,10 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                     ],
                     "properties": json.dumps(
                         [
-                            {"key": "toInt(person.properties.int_value) < 10 and 'bla' != 'a%sd'", "type": "hogql"},
+                            {
+                                "key": "toInt(person.properties.int_value) < 10 and 'bla' != 'a%sd'",
+                                "type": "hogql",
+                            },
                         ]
                     ),
                     "funnel_aggregate_by_hogql": "properties.$browser",
@@ -2597,7 +2856,10 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             response_json = response.json()
             self.assertEqual(len(response_json["result"]), 1)
-            self.assertEqual(response_json["result"][0]["data"], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 50.0, 0.0])
+            self.assertEqual(
+                response_json["result"][0]["data"],
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 50.0, 0.0],
+            )
             self.assertEqual(
                 response_json["result"][0]["days"],
                 [
@@ -2658,8 +2920,14 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                 data={
                     "properties": json.dumps(
                         [
-                            {"key": "toInt(properties.int_value) > 100 and 'bla' != 'a%sd'", "type": "hogql"},
-                            {"key": "like(person.properties.email, '%test.com%')", "type": "hogql"},
+                            {
+                                "key": "toInt(properties.int_value) > 100 and 'bla' != 'a%sd'",
+                                "type": "hogql",
+                            },
+                            {
+                                "key": "like(person.properties.email, '%test.com%')",
+                                "type": "hogql",
+                            },
                         ]
                     ),
                 },
@@ -2672,11 +2940,41 @@ class TestInsight(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
                 data={
                     "properties": json.dumps(
                         [
-                            {"key": "toInt(properties.int_value) > 0 and 'bla' != 'a%sd'", "type": "hogql"},
-                            {"key": "like(person.properties.email, '%test.com%')", "type": "hogql"},
+                            {
+                                "key": "toInt(properties.int_value) > 0 and 'bla' != 'a%sd'",
+                                "type": "hogql",
+                            },
+                            {
+                                "key": "like(person.properties.email, '%test.com%')",
+                                "type": "hogql",
+                            },
                         ]
                     ),
                 },
             ).json()
             self.assertEqual(len(response["result"]), 11)
             self.assertEqual(response["result"][0]["values"][0]["count"], 1)
+
+    @override_settings(HOGQL_INSIGHTS_OVERRIDE=True)
+    def test_insight_with_filters_via_hogql(self) -> None:
+        filter_dict = {"insight": "LIFECYCLE", "events": [{"id": "$pageview"}]}
+
+        Insight.objects.create(
+            filters=Filter(data=filter_dict).to_dict(),
+            team=self.team,
+            short_id="xyz123",
+        )
+
+        # fresh response
+        response = self.client.get(f"/api/projects/{self.team.id}/insights/?short_id=xyz123")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(len(response.json()["results"]), 1)
+        self.assertEqual(response.json()["results"][0]["result"][0]["data"], [0, 0, 0, 0, 0, 0, 0, 0])
+
+        # cached response
+        response = self.client.get(f"/api/projects/{self.team.id}/insights/?short_id=xyz123")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(len(response.json()["results"]), 1)
+        self.assertEqual(response.json()["results"][0]["result"][0]["data"], [0, 0, 0, 0, 0, 0, 0, 0])

@@ -1,6 +1,7 @@
-import { CodeSnippet, Language } from 'lib/components/CodeSnippet'
 import { useValues } from 'kea'
+import { CodeSnippet, Language } from 'lib/components/CodeSnippet'
 import { teamLogic } from 'scenes/teamLogic'
+
 import { JSInstallSnippet } from './js-web'
 
 function ReactEnvVarsSnippet(): JSX.Element {
@@ -9,7 +10,7 @@ function ReactEnvVarsSnippet(): JSX.Element {
     return (
         <CodeSnippet language={Language.Bash}>
             {[
-                `REACT_APP_POSTHOG_PUBLIC_KEY=${currentTeam?.api_token}`,
+                `REACT_APP_PUBLIC_POSTHOG_KEY=${currentTeam?.api_token}`,
                 `REACT_APP_PUBLIC_POSTHOG_HOST=${window.location.origin}`,
             ].join('\n')}
         </CodeSnippet>

@@ -1,8 +1,9 @@
+import { lemonToast } from '@posthog/lemon-ui'
 import {
-    BuiltLogic,
     actions,
     afterMount,
     beforeUnmount,
+    BuiltLogic,
     connect,
     kea,
     key,
@@ -12,38 +13,39 @@ import {
     reducers,
     selectors,
 } from 'kea'
-import { windowValues } from 'kea-window-values'
-import type { sessionRecordingPlayerLogicType } from './sessionRecordingPlayerLogicType'
-import { Replayer } from 'rrweb'
-import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
-import { AvailableFeature, RecordingSegment, SessionPlayerData, SessionPlayerState } from '~/types'
-import { getBreakpoint } from 'lib/utils/responsiveUtils'
-import {
-    SessionRecordingDataLogicProps,
-    sessionRecordingDataLogic,
-} from 'scenes/session-recordings/player/sessionRecordingDataLogic'
-import { deleteRecording } from './utils/playerUtils'
-import { playerSettingsLogic } from './playerSettingsLogic'
-import { clamp, downloadFile, fromParamsGivenUrl } from 'lib/utils'
-import { lemonToast } from '@posthog/lemon-ui'
-import { delay } from 'kea-test-utils'
-import { userLogic } from 'scenes/userLogic'
-import { openBillingPopupModal } from 'scenes/billing/BillingPopup'
-import { MatchingEventsMatchType } from 'scenes/session-recordings/playlist/sessionRecordingsPlaylistLogic'
 import { router } from 'kea-router'
-import { urls } from 'scenes/urls'
-import { wrapConsole } from 'lib/utils/wrapConsole'
-import { SessionRecordingPlayerExplorerProps } from './view-explorer/SessionRecordingPlayerExplorer'
-import { createExportedSessionRecording } from '../file-playback/sessionRecordingFilePlaybackLogic'
-import { RefObject } from 'react'
-import posthog from 'posthog-js'
-import { COMMON_REPLAYER_CONFIG, CorsPlugin } from './rrweb'
-import { now } from 'lib/dayjs'
-import { ReplayPlugin } from 'rrweb/typings/types'
-import { preflightLogic } from 'scenes/PreflightCheck/preflightLogic'
-import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { delay } from 'kea-test-utils'
+import { windowValues } from 'kea-window-values'
 import { FEATURE_FLAGS } from 'lib/constants'
+import { now } from 'lib/dayjs'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { clamp, downloadFile, fromParamsGivenUrl } from 'lib/utils'
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
+import { getBreakpoint } from 'lib/utils/responsiveUtils'
+import { wrapConsole } from 'lib/utils/wrapConsole'
+import posthog from 'posthog-js'
+import { RefObject } from 'react'
+import { Replayer } from 'rrweb'
+import { ReplayPlugin } from 'rrweb/typings/types'
+import { openBillingPopupModal } from 'scenes/billing/BillingPopup'
+import { preflightLogic } from 'scenes/PreflightCheck/preflightLogic'
+import {
+    sessionRecordingDataLogic,
+    SessionRecordingDataLogicProps,
+} from 'scenes/session-recordings/player/sessionRecordingDataLogic'
+import { MatchingEventsMatchType } from 'scenes/session-recordings/playlist/sessionRecordingsPlaylistLogic'
+import { urls } from 'scenes/urls'
+import { userLogic } from 'scenes/userLogic'
+
+import { AvailableFeature, RecordingSegment, SessionPlayerData, SessionPlayerState } from '~/types'
+
+import { createExportedSessionRecording } from '../file-playback/sessionRecordingFilePlaybackLogic'
 import type { sessionRecordingsPlaylistLogicType } from '../playlist/sessionRecordingsPlaylistLogicType'
+import { playerSettingsLogic } from './playerSettingsLogic'
+import { COMMON_REPLAYER_CONFIG, CorsPlugin } from './rrweb'
+import type { sessionRecordingPlayerLogicType } from './sessionRecordingPlayerLogicType'
+import { deleteRecording } from './utils/playerUtils'
+import { SessionRecordingPlayerExplorerProps } from './view-explorer/SessionRecordingPlayerExplorer'
 
 export const PLAYBACK_SPEEDS = [0.5, 1, 2, 3, 4, 8, 16]
 export const ONE_FRAME_MS = 100 // We don't really have frames but this feels granular enough
@@ -102,6 +104,7 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
             [
                 'snapshotsLoaded',
                 'sessionPlayerData',
+                'sessionPlayerMetaData',
                 'sessionPlayerSnapshotDataLoading',
                 'sessionPlayerMetaDataLoading',
             ],
@@ -167,7 +170,7 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
         incrementErrorCount: true,
         incrementWarningCount: (count: number = 1) => ({ count }),
         updateFromMetadata: true,
-        exportRecordingToFile: true,
+        exportRecordingToFile: (exportUntransformedMobileData?: boolean) => ({ exportUntransformedMobileData }),
         deleteRecording: true,
         openExplorer: true,
         closeExplorer: true,
@@ -604,7 +607,7 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
             // If replayer isn't initialized, it will be initialized with the already loaded snapshots
             if (values.player?.replayer) {
                 for (const event of eventsToAdd) {
-                    await values.player?.replayer?.addEvent(event)
+                    values.player?.replayer?.addEvent(event)
                 }
             }
 
@@ -614,7 +617,7 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
             actions.checkBufferingCompleted()
             breakpoint()
         },
-        loadRecordingMetaSuccess: async () => {
+        loadRecordingMetaSuccess: () => {
             // As the connected data logic may be preloaded we call a shared function here and on mount
             actions.updateFromMetadata()
             if (props.autoPlay) {
@@ -623,7 +626,7 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
             }
         },
 
-        loadRecordingSnapshotsSuccess: async () => {
+        loadRecordingSnapshotsSuccess: () => {
             // As the connected data logic may be preloaded we call a shared function here and on mount
             actions.updateFromMetadata()
         },
@@ -689,7 +692,7 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
             actions.reportRecordingPlayerSpeedChanged(speed)
             actions.syncPlayerSpeed()
         },
-        seekToTimestamp: async ({ timestamp, forcePlay }, breakpoint) => {
+        seekToTimestamp: ({ timestamp, forcePlay }, breakpoint) => {
             actions.stopAnimation()
             actions.setCurrentTimestamp(timestamp)
 
@@ -784,7 +787,23 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
                     values.currentPlayerState === SessionPlayerState.SKIP) &&
                 values.timestampChangeTracking.timestampMatchesPrevious > 10
             ) {
-                cache.debug?.('stuck session player detected', values.timestampChangeTracking)
+                // NOTE: We should investigate if this is still happening - logging to posthog recording so we can find this in the future
+                posthog.sessionRecording?.log(
+                    'stuck session player detected - this indicates an issue with the segmenter',
+                    'warn'
+                )
+                cache.debug?.('stuck session player detected', {
+                    timestampChangeTracking: values.timestampChangeTracking,
+                    currentSegment: values.currentSegment,
+                    snapshots: values.sessionPlayerData.snapshotsByWindowId[values.currentSegment?.windowId ?? ''],
+                    player: values.player,
+                    meta: values.player?.replayer.getMetaData(),
+                    rrwebPlayerTime,
+                    segments: values.sessionPlayerData.segments,
+                    segmentIndex:
+                        values.currentSegment && values.sessionPlayerData.segments.indexOf(values.currentSegment),
+                })
+
                 actions.skipPlayerForward(rrwebPlayerTime, skip)
                 newTimestamp = newTimestamp + skip
             }
@@ -811,6 +830,7 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
                         newTimestamp,
                         segments: values.sessionPlayerData.segments,
                         currentSegment: values.currentSegment,
+                        nextSegment,
                         segmentIndex: values.sessionPlayerData.segments.indexOf(values.currentSegment),
                     })
                     // At the end of the recording. Pause the player and set fully to the end
@@ -861,7 +881,7 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
             cache.pausedMediaElements = []
         },
 
-        exportRecordingToFile: async () => {
+        exportRecordingToFile: async ({ exportUntransformedMobileData }) => {
             if (!values.sessionPlayerData) {
                 return
             }
@@ -886,11 +906,16 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
                     await delay(delayTime)
                 }
 
-                const payload = createExportedSessionRecording(sessionRecordingDataLogic(props))
+                const payload = createExportedSessionRecording(
+                    sessionRecordingDataLogic(props),
+                    !!exportUntransformedMobileData
+                )
 
                 const recordingFile = new File(
                     [JSON.stringify(payload, null, 2)],
-                    `export-${props.sessionRecordingId}.ph-recording.json`,
+                    `export-${props.sessionRecordingId}.${
+                        exportUntransformedMobileData ? 'mobile.' : ''
+                    }ph-recording.json`,
                     { type: 'application/json' }
                 )
 
@@ -941,12 +966,12 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
                     console.warn('Failed to enable native full-screen mode:', e)
                 }
             } else if (document.fullscreenElement === props.playerRef?.current) {
-                document.exitFullscreen()
+                await document.exitFullscreen()
             }
         },
     })),
     windowValues({
-        isSmallScreen: (window: any) => window.innerWidth < getBreakpoint('md'),
+        isSmallScreen: (window: Window) => window.innerWidth < getBreakpoint('md'),
     }),
 
     beforeUnmount(({ values, actions, cache, props }) => {

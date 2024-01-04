@@ -1,17 +1,21 @@
 describe('Cohorts', () => {
+    const goToCohorts = (): void => {
+        cy.clickNavMenu('personsmanagement')
+        cy.get('[data-attr=persons-management-cohorts-tab]').click()
+    }
+
     beforeEach(() => {
-        cy.clickNavMenu('cohorts')
+        goToCohorts()
     })
 
     it('Cohorts new and list', () => {
         // load an empty page
-        cy.get('h1').should('contain', 'Cohorts')
-        cy.title().should('equal', 'Cohorts • PostHog')
-        cy.get('h2').should('contain', 'Create your first cohort')
-        cy.get('[data-attr="product-introduction-docs-link"]').should('contain', 'Learn more about Cohorts')
+        cy.title().should('equal', 'Cohorts • People • PostHog')
+        cy.contains('Create your first cohort').should('exist')
+        cy.get('[data-attr="product-introduction-docs-link"]').should('contain', 'Learn more')
 
         // go to create a new cohort
-        cy.get('[data-attr="create-cohort"]').click()
+        cy.get('[data-attr="new-cohort"]').click()
 
         // select "add filter" and "property"
         cy.get('[data-attr="cohort-selector-field-value"]').click()
@@ -34,9 +38,9 @@ describe('Cohorts', () => {
         cy.get('[data-attr=success-toast]').contains('Cohort saved').should('exist')
 
         // back to cohorts
-        cy.clickNavMenu('cohorts')
+        goToCohorts()
         cy.get('tbody').contains('Test Cohort')
-        cy.get('h2').should('not.have.text', 'Create your first cohort')
+        cy.contains('Create your first cohort').should('not.exist')
 
         it('Cohorts new and list', () => {
             cy.get('[data-row-key]').first().click()
@@ -69,7 +73,7 @@ describe('Cohorts', () => {
         // delete cohort
         cy.get('[data-attr="more-button"]').click()
         cy.get('.Popover__content').contains('Delete cohort').click()
-        cy.clickNavMenu('cohorts')
+        goToCohorts()
         cy.get('tbody').should('not.have.text', 'Test Cohort (dynamic copy) (static copy)')
     })
 })

@@ -1,11 +1,13 @@
-import { kea } from 'kea'
-import { BillingProductV2Type, ProductKey } from '~/types'
-import { urls } from 'scenes/urls'
-
+import { actions, connect, kea, listeners, path, props, reducers, selectors } from 'kea'
+import { actionToUrl, combineUrl, router, urlToAction } from 'kea-router'
+import { FEATURE_FLAGS } from 'lib/constants'
+import { featureFlagLogic, FeatureFlagsSet } from 'lib/logic/featureFlagLogic'
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { billingLogic } from 'scenes/billing/billingLogic'
 import { teamLogic } from 'scenes/teamLogic'
-import { combineUrl, router } from 'kea-router'
-import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
+import { urls } from 'scenes/urls'
+
+import { BillingProductV2Type, ProductKey } from '~/types'
 
 import type { onboardingLogicType } from './onboardingLogicType'
 
@@ -19,44 +21,50 @@ export enum OnboardingStepKey {
     BILLING = 'billing',
     OTHER_PRODUCTS = 'other_products',
     VERIFY = 'verify',
+    PRODUCT_CONFIGURATION = 'configure',
+    INVITE_TEAMMATES = 'invite_teammates',
 }
 
 // These types have to be set like this, so that kea typegen is happy
 export type AllOnboardingSteps = OnboardingStep[]
 export type OnboardingStep = JSX.Element
 
-export const getProductUri = (productKey: ProductKey): string => {
+export const getProductUri = (productKey: ProductKey, featureFlags: FeatureFlagsSet): string => {
     switch (productKey) {
-        case 'product_analytics':
-            return combineUrl(urls.events(), { onboarding_completed: true }).url
-        case 'session_replay':
+        case ProductKey.PRODUCT_ANALYTICS:
+            return featureFlags[FEATURE_FLAGS.REDIRECT_INGESTION_PRODUCT_ANALYTICS_ONBOARDING] === 'test'
+                ? combineUrl(urls.insights(), { onboarding_completed: true }).url
+                : combineUrl(urls.events(), { onboarding_completed: true }).url
+        case ProductKey.SESSION_REPLAY:
             return urls.replay()
-        case 'feature_flags':
+        case ProductKey.FEATURE_FLAGS:
             return urls.featureFlags()
+        case ProductKey.SURVEYS:
+            return urls.surveys()
         default:
             return urls.default()
     }
 }
 
-export const onboardingLogic = kea<onboardingLogicType>({
-    props: {} as OnboardingLogicProps,
-    path: ['scenes', 'onboarding', 'onboardingLogic'],
-    connect: {
-        values: [billingLogic, ['billing'], teamLogic, ['currentTeam']],
+export const onboardingLogic = kea<onboardingLogicType>([
+    props({} as OnboardingLogicProps),
+    path(['scenes', 'onboarding', 'onboardingLogic']),
+    connect({
+        values: [billingLogic, ['billing'], teamLogic, ['currentTeam'], featureFlagLogic, ['featureFlags']],
         actions: [billingLogic, ['loadBillingSuccess'], teamLogic, ['updateCurrentTeamSuccess']],
-    },
-    actions: {
+    }),
+    actions({
         setProduct: (product: BillingProductV2Type | null) => ({ product }),
         setProductKey: (productKey: string | null) => ({ productKey }),
         completeOnboarding: (nextProductKey?: string) => ({ nextProductKey }),
         setAllOnboardingSteps: (allOnboardingSteps: AllOnboardingSteps) => ({ allOnboardingSteps }),
-        setStepKey: (stepKey: string) => ({ stepKey }),
+        setStepKey: (stepKey: OnboardingStepKey) => ({ stepKey }),
         setSubscribedDuringOnboarding: (subscribedDuringOnboarding: boolean) => ({ subscribedDuringOnboarding }),
         goToNextStep: true,
         goToPreviousStep: true,
         resetStepKey: true,
-    },
-    reducers: () => ({
+    }),
+    reducers(() => ({
         productKey: [
             null as string | null,
             {
@@ -72,21 +80,13 @@ export const onboardingLogic = kea<onboardingLogicType>({
         allOnboardingSteps: [
             [] as AllOnboardingSteps,
             {
-                setAllOnboardingSteps: (_, { allOnboardingSteps }) => allOnboardingSteps as AllOnboardingSteps,
+                setAllOnboardingSteps: (_, { allOnboardingSteps }) => allOnboardingSteps,
             },
         ],
         stepKey: [
-            '' as string,
+            '' as OnboardingStepKey,
             {
                 setStepKey: (_, { stepKey }) => stepKey,
-            },
-        ],
-        onCompleteOnboardingRedirectUrl: [
-            urls.default() as string,
-            {
-                setProductKey: (_, { productKey }) => {
-                    return productKey ? getProductUri(productKey as ProductKey) : urls.default()
-                },
             },
         ],
         subscribedDuringOnboarding: [
@@ -95,8 +95,14 @@ export const onboardingLogic = kea<onboardingLogicType>({
                 setSubscribedDuringOnboarding: (_, { subscribedDuringOnboarding }) => subscribedDuringOnboarding,
             },
         ],
-    }),
-    selectors: {
+    })),
+    selectors({
+        onCompleteOnboardingRedirectUrl: [
+            (s) => [s.featureFlags, s.productKey],
+            (featureFlags: FeatureFlagsSet, productKey: string | null) => {
+                return productKey ? getProductUri(productKey as ProductKey, featureFlags) : urls.default()
+            },
+        ],
         totalOnboardingSteps: [
             (s) => [s.allOnboardingSteps],
             (allOnboardingSteps: AllOnboardingSteps) => allOnboardingSteps.length,
@@ -148,10 +154,12 @@ export const onboardingLogic = kea<onboardingLogicType>({
                 (stepKey && allOnboardingSteps.length > 0 && !currentOnboardingStep) ||
                 (!stepKey && allOnboardingSteps.length > 0),
         ],
-    },
-    listeners: ({ actions, values }) => ({
+    }),
+    listeners(({ actions, values }) => ({
         loadBillingSuccess: () => {
-            actions.setProduct(values.billing?.products.find((p) => p.type === values.productKey) || null)
+            if (window.location.pathname.startsWith('/onboarding')) {
+                actions.setProduct(values.billing?.products.find((p) => p.type === values.productKey) || null)
+            }
         },
         setProduct: ({ product }) => {
             if (!product) {
@@ -203,10 +211,10 @@ export const onboardingLogic = kea<onboardingLogicType>({
             }
         },
         resetStepKey: () => {
-            actions.setStepKey(values.allOnboardingSteps[0].props.stepKey)
+            values.allOnboardingSteps[0] && actions.setStepKey(values.allOnboardingSteps[0]?.props.stepKey)
         },
-    }),
-    actionToUrl: ({ values }) => ({
+    })),
+    actionToUrl(({ values }) => ({
         setStepKey: ({ stepKey }) => {
             if (stepKey) {
                 return [`/onboarding/${values.productKey}`, { step: stepKey }]
@@ -241,8 +249,8 @@ export const onboardingLogic = kea<onboardingLogicType>({
                 return [values.onCompleteOnboardingRedirectUrl]
             }
         },
-    }),
-    urlToAction: ({ actions, values }) => ({
+    })),
+    urlToAction(({ actions, values }) => ({
         '/onboarding/:productKey': ({ productKey }, { success, upgraded, step }) => {
             if (!productKey) {
                 window.location.href = urls.default()
@@ -260,5 +268,5 @@ export const onboardingLogic = kea<onboardingLogicType>({
                 actions.resetStepKey()
             }
         },
-    }),
-})
+    })),
+])

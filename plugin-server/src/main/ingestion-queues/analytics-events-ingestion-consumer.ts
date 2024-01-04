@@ -1,11 +1,11 @@
 import { Message } from 'node-rdkafka'
 import { Counter } from 'prom-client'
 
+import { buildStringMatcher } from '../../config/config'
 import { KAFKA_EVENTS_PLUGIN_INGESTION, prefix as KAFKA_PREFIX } from '../../config/kafka-topics'
 import { Hub } from '../../types'
 import { isIngestionOverflowEnabled } from '../../utils/env-utils'
 import { status } from '../../utils/status'
-import Piscina from '../../worker/piscina'
 import { eachBatchParallelIngestion, IngestionOverflowMode } from './batch-processing/each-batch-ingestion'
 import { IngestionConsumer } from './kafka-queue'
 
@@ -17,10 +17,8 @@ export const ingestionPartitionKeyOverflowed = new Counter({
 
 export const startAnalyticsEventsIngestionConsumer = async ({
     hub, // TODO: remove needing to pass in the whole hub and be more selective on dependency injection.
-    piscina,
 }: {
     hub: Hub
-    piscina: Piscina
 }) => {
     /*
         Consumes analytics events from the Kafka topic `events_plugin_ingestion`
@@ -50,13 +48,14 @@ export const startAnalyticsEventsIngestionConsumer = async ({
     // enabling re-production of events to the OVERFLOW topic.
 
     const overflowMode = isIngestionOverflowEnabled() ? IngestionOverflowMode.Reroute : IngestionOverflowMode.Disabled
+
+    const tokenBlockList = buildStringMatcher(hub.DROP_EVENTS_BY_TOKEN, false)
     const batchHandler = async (messages: Message[], queue: IngestionConsumer): Promise<void> => {
-        await eachBatchParallelIngestion(messages, queue, overflowMode)
+        await eachBatchParallelIngestion(tokenBlockList, messages, queue, overflowMode)
     }
 
     const queue = new IngestionConsumer(
         hub,
-        piscina,
         KAFKA_EVENTS_PLUGIN_INGESTION,
         `${KAFKA_PREFIX}clickhouse-ingestion`,
         batchHandler

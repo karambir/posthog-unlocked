@@ -3,14 +3,14 @@ from dataclasses import dataclass
 from enum import Enum
 import time
 import structlog
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, cast
 
 from prometheus_client import Counter
 from django.conf import settings
 from django.db import DatabaseError, IntegrityError, OperationalError
 from django.db.models.expressions import ExpressionWrapper, RawSQL
 from django.db.models.fields import BooleanField
-from django.db.models import Q
+from django.db.models import Q, Func, F, CharField
 from django.db.models.query import QuerySet
 from sentry_sdk.api import capture_exception, start_span
 from posthog.metrics import LABEL_TEAM_ID
@@ -24,8 +24,11 @@ from posthog.models.property import GroupTypeIndex, GroupTypeName
 from posthog.models.property.property import Property
 from posthog.models.cohort import Cohort
 from posthog.models.utils import execute_with_timeout
-from posthog.queries.base import match_property, properties_to_Q
-from posthog.database_healthcheck import postgres_healthcheck, DATABASE_FOR_FLAG_MATCHING
+from posthog.queries.base import match_property, properties_to_Q, sanitize_property_key
+from posthog.database_healthcheck import (
+    postgres_healthcheck,
+    DATABASE_FOR_FLAG_MATCHING,
+)
 from posthog.utils import label_for_team_id_to_track
 
 from .feature_flag import (
@@ -123,7 +126,6 @@ class FlagsMatcherCache:
 
 
 class FeatureFlagMatcher:
-
     failed_to_fetch_conditions = False
 
     def __init__(
@@ -136,6 +138,7 @@ class FeatureFlagMatcher:
         property_value_overrides: Dict[str, Union[str, int]] = {},
         group_property_value_overrides: Dict[str, Dict[str, Union[str, int]]] = {},
         skip_database_flags: bool = False,
+        cohorts_cache: Optional[Dict[int, Cohort]] = None,
     ):
         self.feature_flags = feature_flags
         self.distinct_id = distinct_id
@@ -145,7 +148,11 @@ class FeatureFlagMatcher:
         self.property_value_overrides = property_value_overrides
         self.group_property_value_overrides = group_property_value_overrides
         self.skip_database_flags = skip_database_flags
-        self.cohorts_cache: Dict[int, Cohort] = {}
+
+        if cohorts_cache is None:
+            self.cohorts_cache = {}
+        else:
+            self.cohorts_cache = cohorts_cache
 
     def get_match(self, feature_flag: FeatureFlag) -> FeatureFlagMatch:
         # If aggregating flag by groups and relevant group type is not passed - flag is off!
@@ -157,7 +164,11 @@ class FeatureFlagMatcher:
 
         # Match for boolean super condition first
         if feature_flag.filters.get("super_groups", None):
-            is_match, super_condition_value, evaluation_reason = self.is_super_condition_match(feature_flag)
+            (
+                is_match,
+                super_condition_value,
+                evaluation_reason,
+            ) = self.is_super_condition_match(feature_flag)
             if is_match:
                 payload = self.get_matching_payload(super_condition_value, None, feature_flag)
                 return FeatureFlagMatch(
@@ -185,11 +196,21 @@ class FeatureFlagMatcher:
 
                 payload = self.get_matching_payload(is_match, variant, feature_flag)
                 return FeatureFlagMatch(
-                    match=True, variant=variant, reason=evaluation_reason, condition_index=index, payload=payload
+                    match=True,
+                    variant=variant,
+                    reason=evaluation_reason,
+                    condition_index=index,
+                    payload=payload,
                 )
 
-            highest_priority_evaluation_reason, highest_priority_index = self.get_highest_priority_match_evaluation(
-                highest_priority_evaluation_reason, highest_priority_index, evaluation_reason, index
+            (
+                highest_priority_evaluation_reason,
+                highest_priority_index,
+            ) = self.get_highest_priority_match_evaluation(
+                highest_priority_evaluation_reason,
+                highest_priority_index,
+                evaluation_reason,
+                index,
             )
 
         return FeatureFlagMatch(
@@ -228,7 +249,12 @@ class FeatureFlagMatcher:
                 faced_error_computing_flags = True
                 handle_feature_flag_exception(err, "[Feature Flags] Error computing flags")
 
-        return flag_values, flag_evaluation_reasons, flag_payloads, faced_error_computing_flags
+        return (
+            flag_values,
+            flag_evaluation_reasons,
+            flag_payloads,
+            faced_error_computing_flags,
+        )
 
     def get_matching_variant(self, feature_flag: FeatureFlag) -> Optional[str]:
         for variant in self.variant_lookup_table(feature_flag):
@@ -260,7 +286,11 @@ class FeatureFlagMatcher:
         super_condition_value = self._super_condition_matches(feature_flag)
 
         if super_condition_value_is_set:
-            return True, super_condition_value, FeatureFlagMatchReason.SUPER_CONDITION_VALUE
+            return (
+                True,
+                super_condition_value,
+                FeatureFlagMatchReason.SUPER_CONDITION_VALUE,
+            )
 
         # Evaluate if properties are empty
         if feature_flag.super_conditions and len(feature_flag.super_conditions) > 0:
@@ -291,7 +321,8 @@ class FeatureFlagMatcher:
                 target_properties = self.property_value_overrides
                 if feature_flag.aggregation_group_type_index is not None:
                     target_properties = self.group_property_value_overrides.get(
-                        self.cache.group_type_index_to_name[feature_flag.aggregation_group_type_index], {}
+                        self.cache.group_type_index_to_name[feature_flag.aggregation_group_type_index],
+                        {},
                     )
                 condition_match = all(match_property(property, target_properties) for property in properties)
             else:
@@ -345,7 +376,9 @@ class FeatureFlagMatcher:
                 all_conditions: Dict = {}
                 team_id = self.feature_flags[0].team_id
                 person_query: QuerySet = Person.objects.using(DATABASE_FOR_FLAG_MATCHING).filter(
-                    team_id=team_id, persondistinctid__distinct_id=self.distinct_id, persondistinctid__team_id=team_id
+                    team_id=team_id,
+                    persondistinctid__distinct_id=self.distinct_id,
+                    persondistinctid__team_id=team_id,
                 )
                 basic_group_query: QuerySet = Group.objects.using(DATABASE_FOR_FLAG_MATCHING).filter(team_id=team_id)
                 group_query_per_group_type_mapping: Dict[GroupTypeIndex, Tuple[QuerySet, List[str]]] = {}
@@ -368,15 +401,22 @@ class FeatureFlagMatcher:
                     annotate_query = True
                     nonlocal person_query
 
+                    property_list = Filter(data=condition).property_groups.flat
+                    properties_with_math_operators = get_all_properties_with_math_operators(
+                        property_list, self.cohorts_cache
+                    )
+
                     if len(condition.get("properties", {})) > 0:
                         # Feature Flags don't support OR filtering yet
                         target_properties = self.property_value_overrides
                         if feature_flag.aggregation_group_type_index is not None:
                             target_properties = self.group_property_value_overrides.get(
-                                self.cache.group_type_index_to_name[feature_flag.aggregation_group_type_index], {}
+                                self.cache.group_type_index_to_name[feature_flag.aggregation_group_type_index],
+                                {},
                             )
+
                         expr = properties_to_Q(
-                            Filter(data=condition).property_groups.flat,
+                            property_list,
                             override_property_values=target_properties,
                             cohorts_cache=self.cohorts_cache,
                             using_database=DATABASE_FOR_FLAG_MATCHING,
@@ -399,27 +439,46 @@ class FeatureFlagMatcher:
 
                     if annotate_query:
                         if feature_flag.aggregation_group_type_index is None:
+                            # :TRICKY: Flag matching depends on type of property when doing >, <, >=, <= comparisons.
+                            # This requires a generated field to query in Q objects, which sadly don't allow inlining fields,
+                            # hence we need to annotate the query here, even though these annotations are used much deeper,
+                            # in properties_to_q, in empty_or_null_with_value_q
+                            # These need to come in before the expr so they're available to use inside the expr.
+                            # Same holds for the group queries below.
+                            type_property_annotations = {
+                                prop_key: Func(F(prop_field), function="JSONB_TYPEOF", output_field=CharField())
+                                for prop_key, prop_field in properties_with_math_operators
+                            }
                             person_query = person_query.annotate(
+                                **type_property_annotations,
                                 **{
                                     key: ExpressionWrapper(
-                                        expr if expr else RawSQL("true", []), output_field=BooleanField()
-                                    )
-                                }
+                                        expr if expr else RawSQL("true", []),
+                                        output_field=BooleanField(),
+                                    ),
+                                },
                             )
                             person_fields.append(key)
                         else:
                             if feature_flag.aggregation_group_type_index not in group_query_per_group_type_mapping:
                                 # ignore flags that didn't have the right groups passed in
                                 return
-                            group_query, group_fields = group_query_per_group_type_mapping[
-                                feature_flag.aggregation_group_type_index
-                            ]
+                            (
+                                group_query,
+                                group_fields,
+                            ) = group_query_per_group_type_mapping[feature_flag.aggregation_group_type_index]
+                            type_property_annotations = {
+                                prop_key: Func(F(prop_field), function="JSONB_TYPEOF", output_field=CharField())
+                                for prop_key, prop_field in properties_with_math_operators
+                            }
                             group_query = group_query.annotate(
+                                **type_property_annotations,
                                 **{
                                     key: ExpressionWrapper(
-                                        expr if expr else RawSQL("true", []), output_field=BooleanField()
+                                        expr if expr else RawSQL("true", []),
+                                        output_field=BooleanField(),
                                     )
-                                }
+                                },
                             )
                             group_fields.append(key)
                             group_query_per_group_type_mapping[feature_flag.aggregation_group_type_index] = (
@@ -427,7 +486,8 @@ class FeatureFlagMatcher:
                                 group_fields,
                             )
 
-                if any(feature_flag.uses_cohorts for feature_flag in self.feature_flags):
+                # only fetch all cohorts if not passed in any cached cohorts
+                if not self.cohorts_cache and any(feature_flag.uses_cohorts for feature_flag in self.feature_flags):
                     all_cohorts = {
                         cohort.pk: cohort
                         for cohort in Cohort.objects.using(DATABASE_FOR_FLAG_MATCHING).filter(
@@ -437,7 +497,6 @@ class FeatureFlagMatcher:
                     self.cohorts_cache.update(all_cohorts)
                 # release conditions
                 for feature_flag in self.feature_flags:
-
                     # super release conditions
                     if feature_flag.super_conditions and len(feature_flag.super_conditions) > 0:
                         condition = feature_flag.super_conditions[0]
@@ -470,7 +529,10 @@ class FeatureFlagMatcher:
                     if len(person_query) > 0:
                         all_conditions = {**all_conditions, **person_query[0]}
 
-                for group_query, group_fields in group_query_per_group_type_mapping.values():
+                for (
+                    group_query,
+                    group_fields,
+                ) in group_query_per_group_type_mapping.values():
                     group_query = group_query.values(*group_fields)
                     if len(group_query) > 0:
                         assert len(group_query) == 1, f"Expected 1 group query result, got {len(group_query)}"
@@ -516,7 +578,9 @@ class FeatureFlagMatcher:
         return hash_val / __LONG_SCALE__
 
     def can_compute_locally(
-        self, properties: List[Property], group_type_index: Optional[GroupTypeIndex] = None
+        self,
+        properties: List[Property],
+        group_type_index: Optional[GroupTypeIndex] = None,
     ) -> bool:
         target_properties = self.property_value_overrides
         if group_type_index is not None:
@@ -524,6 +588,10 @@ class FeatureFlagMatcher:
                 self.cache.group_type_index_to_name[group_type_index], {}
             )
         for property in properties:
+            # can't locally compute if property is a cohort
+            # need to atleast fetch the cohort
+            if property.type == "cohort":
+                return False
             if property.key not in target_properties:
                 return False
             if property.operator == "is_not_set":
@@ -544,19 +612,24 @@ class FeatureFlagMatcher:
 
 
 def get_feature_flag_hash_key_overrides(
-    team_id: int, distinct_ids: List[str], using_database: str = "default"
+    team_id: int,
+    distinct_ids: List[str],
+    using_database: str = "default",
+    person_id_to_distinct_id_mapping: Optional[Dict[int, str]] = None,
 ) -> Dict[str, str]:
     feature_flag_to_key_overrides = {}
 
     # Priority to the first distinctID's values, to keep this function deterministic
 
-    person_and_distinct_ids = list(
-        PersonDistinctId.objects.using(using_database)
-        .filter(distinct_id__in=distinct_ids, team_id=team_id)
-        .values_list("person_id", "distinct_id")
-    )
-
-    person_id_to_distinct_id = {person_id: distinct_id for person_id, distinct_id in person_and_distinct_ids}
+    if not person_id_to_distinct_id_mapping:
+        person_and_distinct_ids = list(
+            PersonDistinctId.objects.using(using_database)
+            .filter(distinct_id__in=distinct_ids, team_id=team_id)
+            .values_list("person_id", "distinct_id")
+        )
+        person_id_to_distinct_id = {person_id: distinct_id for person_id, distinct_id in person_and_distinct_ids}
+    else:
+        person_id_to_distinct_id = person_id_to_distinct_id_mapping
 
     person_ids = list(person_id_to_distinct_id.keys())
 
@@ -609,7 +682,6 @@ def get_all_feature_flags(
     property_value_overrides: Dict[str, Union[str, int]] = {},
     group_property_value_overrides: Dict[str, Dict[str, Union[str, int]]] = {},
 ) -> Tuple[Dict[str, Union[str, bool]], Dict[str, dict], Dict[str, object], bool]:
-
     all_feature_flags = get_feature_flags_for_team_in_cache(team_id)
     cache_hit = True
     if all_feature_flags is None:
@@ -664,7 +736,10 @@ def get_all_feature_flags(
                         SELECT key FROM posthog_featureflag WHERE team_id = %(team_id)s AND ensure_experience_continuity = TRUE AND active = TRUE AND deleted = FALSE
                             AND key NOT IN (SELECT feature_flag_key FROM existing_overrides)
                     """
-                    cursor.execute(query, {"team_id": team_id, "distinct_ids": tuple(distinct_ids)})  # type: ignore
+                    cursor.execute(
+                        query,
+                        {"team_id": team_id, "distinct_ids": tuple(distinct_ids)},  # type: ignore
+                    )
                     flags_with_no_overrides = [row[0] for row in cursor.fetchall()]
                     should_write_hash_key_override = len(flags_with_no_overrides) > 0
             except Exception as e:
@@ -682,14 +757,15 @@ def get_all_feature_flags(
                     # In all cases, we simply try to find all personIDs associated with the distinct_id
                     # and the hash_key_override, and add overrides for all these personIDs.
                     # On merge, if a person is deleted, it is fine because the below line in plugin-server will take care of it.
-                    # https://github.com/PostHog/posthog/blob/master/plugin-server/src/worker/ingestion/person-state.ts#L696 (addFeatureFlagHashKeysForMergedPerson)
+                    # https://github.com/PostHog/posthog/blob/master/plugin-server/src/utils/db/db.ts (updateCohortsAndFeatureFlagsForMerge)
 
                     writing_hash_key_override = set_feature_flag_hash_key_overrides(
                         team_id, [distinct_id, hash_key_override], hash_key_override
                     )
                     team_id_label = label_for_team_id_to_track(team_id)
                     FLAG_HASH_KEY_WRITES_COUNTER.labels(
-                        team_id=team_id_label, successful_write=writing_hash_key_override
+                        team_id=team_id_label,
+                        successful_write=writing_hash_key_override,
                     ).inc()
                 except Exception as e:
                     # If the database is in read-only mode, we can't handle experience continuity flags,
@@ -698,7 +774,9 @@ def get_all_feature_flags(
                     # For this case, and for any other case, do not error out on decide, just continue assuming continuity couldn't happen.
                     # At the same time, don't set db down, because the read-replica might still be up.
                     handle_feature_flag_exception(
-                        e, "[Feature Flags] Error while setting feature flag hash key overrides", set_healthcheck=False
+                        e,
+                        "[Feature Flags] Error while setting feature flag hash key overrides",
+                        set_healthcheck=False,
                     )
 
     # This is the read-path for experience continuity. We need to get the overrides, and to do that, we get the person_id.
@@ -786,14 +864,24 @@ def set_feature_flag_hash_key_overrides(team_id: int, distinct_ids: List[str], h
                 # We don't want to return an error response for `/decide` just because of this.
                 # There can be cases where it's a different override (like a person on two different browser sending the same request at the same time),
                 # but we don't care about that case because first override wins.
-                cursor.execute(query, {"team_id": team_id, "distinct_ids": tuple(distinct_ids), "hash_key_override": hash_key_override})  # type: ignore
+                cursor.execute(
+                    query,
+                    {
+                        "team_id": team_id,
+                        "distinct_ids": tuple(distinct_ids),  # type: ignore
+                        "hash_key_override": hash_key_override,
+                    },
+                )
                 return cursor.rowcount > 0
 
         except IntegrityError as e:
             if "violates foreign key constraint" in str(e) and retry < max_retries - 1:
                 # This can happen if a person is deleted while we're trying to add overrides for it.
                 # This is the only case when we retry.
-                logger.info("Retrying set_feature_flag_hash_key_overrides due to person deletion", exc_info=True)
+                logger.info(
+                    "Retrying set_feature_flag_hash_key_overrides due to person deletion",
+                    exc_info=True,
+                )
                 time.sleep(retry_delay)
             else:
                 raise e
@@ -830,3 +918,35 @@ def parse_exception_for_error_message(err: Exception):
             reason = "query_wait_timeout"
 
     return reason
+
+
+def key_and_field_for_property(property: Property) -> Tuple[str, str]:
+    column = "group_properties" if property.type == "group" else "properties"
+    key = property.key
+    sanitized_key = sanitize_property_key(key)
+
+    return (
+        f"{column}_{sanitized_key}_type",
+        f"{column}__{key}",
+    )
+
+
+def get_all_properties_with_math_operators(
+    properties: List[Property], cohorts_cache: Dict[int, Cohort]
+) -> List[Tuple[str, str]]:
+    all_keys_and_fields = []
+
+    for prop in properties:
+        if prop.type == "cohort":
+            cohort_id = int(cast(Union[str, int], prop.value))
+            if cohorts_cache.get(cohort_id) is None:
+                cohorts_cache[cohort_id] = Cohort.objects.using(DATABASE_FOR_FLAG_MATCHING).get(pk=cohort_id)
+            cohort = cohorts_cache[cohort_id]
+            if cohort:
+                all_keys_and_fields.extend(
+                    get_all_properties_with_math_operators(cohort.properties.flat, cohorts_cache)
+                )
+        elif prop.operator in ["gt", "lt", "gte", "lte"] and prop.type in ("person", "group"):
+            all_keys_and_fields.append(key_and_field_for_property(prop))
+
+    return all_keys_and_fields

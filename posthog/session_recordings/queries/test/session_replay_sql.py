@@ -7,7 +7,10 @@ from dateutil.relativedelta import relativedelta
 
 from posthog.clickhouse.log_entries import INSERT_LOG_ENTRY_SQL
 from posthog.kafka_client.client import ClickhouseProducer
-from posthog.kafka_client.topics import KAFKA_CLICKHOUSE_SESSION_REPLAY_EVENTS, KAFKA_LOG_ENTRIES
+from posthog.kafka_client.topics import (
+    KAFKA_CLICKHOUSE_SESSION_REPLAY_EVENTS,
+    KAFKA_LOG_ENTRIES,
+)
 from posthog.models.event.util import format_clickhouse_timestamp
 from posthog.utils import cast_timestamp_or_now
 
@@ -25,7 +28,8 @@ INSERT INTO sharded_session_replay_events (
     active_milliseconds,
     console_log_count,
     console_warn_count,
-    console_error_count
+    console_error_count,
+    snapshot_source
 )
 SELECT
     %(session_id)s,
@@ -40,7 +44,8 @@ SELECT
     %(active_milliseconds)s,
     %(console_log_count)s,
     %(console_warn_count)s,
-    %(console_error_count)s
+    %(console_error_count)s,
+    argMinState(cast(%(snapshot_source)s, 'LowCardinality(Nullable(String))'), toDateTime64(%(first_timestamp)s, 6, 'UTC'))
 """
 
 
@@ -109,6 +114,7 @@ def produce_replay_summary(
     console_warn_count: Optional[int] = None,
     console_error_count: Optional[int] = None,
     log_messages: Dict[str, List[str]] | None = None,
+    snapshot_source: str | None = None,
 ):
     if log_messages is None:
         log_messages = {}
@@ -131,10 +137,15 @@ def produce_replay_summary(
         "console_log_count": console_log_count or 0,
         "console_warn_count": console_warn_count or 0,
         "console_error_count": console_error_count or 0,
+        "snapshot_source": snapshot_source,
     }
     p = ClickhouseProducer()
     # because this is in a test it will write directly using SQL not really with Kafka
-    p.produce(topic=KAFKA_CLICKHOUSE_SESSION_REPLAY_EVENTS, sql=INSERT_SINGLE_SESSION_REPLAY, data=data)
+    p.produce(
+        topic=KAFKA_CLICKHOUSE_SESSION_REPLAY_EVENTS,
+        sql=INSERT_SINGLE_SESSION_REPLAY,
+        data=data,
+    )
 
     for level, messages in log_messages.items():
         for message in messages:

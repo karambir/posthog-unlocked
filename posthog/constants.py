@@ -33,6 +33,9 @@ class AvailableFeature(str, Enum):
     ROLE_BASED_ACCESS = "role_based_access"
     RECORDINGS_FILE_EXPORT = "recordings_file_export"
     RECORDINGS_PERFORMANCE = "recordings_performance"
+    SURVEYS_STYLING = "surveys_styling"
+    SURVEYS_TEXT_HTML = "surveys_text_html"
+    SURVEYS_MULTIPLE_QUESTIONS = "surveys_multiple_questions"
 
 
 TREND_FILTER_TYPE_ACTIONS = "actions"
@@ -52,7 +55,13 @@ TRENDS_WORLD_MAP = "WorldMap"
 TRENDS_BOLD_NUMBER = "BoldNumber"
 
 # Sync with frontend NON_TIME_SERIES_DISPLAY_TYPES
-NON_TIME_SERIES_DISPLAY_TYPES = [TRENDS_TABLE, TRENDS_PIE, TRENDS_BAR_VALUE, TRENDS_WORLD_MAP, TRENDS_BOLD_NUMBER]
+NON_TIME_SERIES_DISPLAY_TYPES = [
+    TRENDS_TABLE,
+    TRENDS_PIE,
+    TRENDS_BAR_VALUE,
+    TRENDS_WORLD_MAP,
+    TRENDS_BOLD_NUMBER,
+]
 # Sync with frontend NON_BREAKDOWN_DISPLAY_TYPES
 NON_BREAKDOWN_DISPLAY_TYPES = [TRENDS_BOLD_NUMBER]
 
@@ -195,6 +204,7 @@ PATH_MIN_EDGE_WEIGHT = "min_edge_weight"
 PATH_MAX_EDGE_WEIGHT = "max_edge_weight"
 AGGREGATION_GROUP_TYPE_INDEX = "aggregation_group_type_index"
 BREAKDOWN_HISTOGRAM_BIN_COUNT = "breakdown_histogram_bin_count"
+BREAKDOWN_HIDE_OTHER_AGGREGATION = "breakdown_hide_other_aggregation"
 BREAKDOWN_NORMALIZE_URL = "breakdown_normalize_url"
 SAMPLING_FACTOR = "sampling_factor"
 
@@ -291,3 +301,5 @@ class FlagRequestType(str, Enum):
 
 
 ENRICHED_DASHBOARD_INSIGHT_IDENTIFIER = "Feature Viewed"
+DATA_WAREHOUSE_TASK_QUEUE = "data-warehouse-task-queue"
+BATCH_EXPORTS_TASK_QUEUE = "no-sandbox-python-django"

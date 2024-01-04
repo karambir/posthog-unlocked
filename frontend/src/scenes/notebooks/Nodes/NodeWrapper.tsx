@@ -3,109 +3,103 @@ import {
     NodeViewWrapper,
     mergeAttributes,
     ReactNodeViewRenderer,
-    ExtendedRegExpMatchArray,
-    Attribute,
     NodeViewProps,
     getExtensionField,
 } from '@tiptap/react'
-import { memo, useCallback, useRef } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
     IconClose,
     IconDragHandle,
     IconFilter,
     IconLink,
-    IconPlusMini,
+    IconPlus,
     IconUnfoldLess,
     IconUnfoldMore,
 } from 'lib/lemon-ui/icons'
-import { LemonButton } from '@posthog/lemon-ui'
+import { LemonButton, LemonMenu, LemonMenuItems } from '@posthog/lemon-ui'
 import './NodeWrapper.scss'
 import { LemonSkeleton } from 'lib/lemon-ui/LemonSkeleton'
-import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
+import { BindLogic, BuiltLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { notebookLogic } from '../Notebook/notebookLogic'
 import { useInView } from 'react-intersection-observer'
-import { NotebookNodeType } from '~/types'
+import { NotebookNodeResource } from '~/types'
 import { ErrorBoundary } from '~/layout/ErrorBoundary'
-import { NotebookNodeContext, NotebookNodeLogicProps, notebookNodeLogic } from './notebookNodeLogic'
+import { NotebookNodeLogicProps, notebookNodeLogic } from './notebookNodeLogic'
 import { posthogNodePasteRule, useSyncedAttributes } from './utils'
 import {
-    NotebookNodeAttributes,
+    KNOWN_NODES,
     NotebookNodeProps,
     CustomNotebookNodeAttributes,
-    NotebookNodeSettings,
+    CreatePostHogWidgetNodeOptions,
+    NodeWrapperProps,
 } from '../Notebook/utils'
 import { useWhyDidIRender } from 'lib/hooks/useWhyDidIRender'
 import { NotebookNodeTitle } from './components/NotebookNodeTitle'
+import { notebookNodeLogicType } from './notebookNodeLogicType'
+import { SlashCommandsPopover } from '../Notebook/SlashCommands'
+import posthog from 'posthog-js'
+import { NotebookNodeContext } from './NotebookNodeContext'
+import { IconCopy, IconEllipsis, IconGear } from '@posthog/icons'
 
-export interface NodeWrapperProps<T extends CustomNotebookNodeAttributes> {
-    nodeType: NotebookNodeType
-    Component: (props: NotebookNodeProps<T>) => JSX.Element | null
-
-    // Meta properties - these should never be too advanced - more advanced should be done via updateAttributes in the component
-    titlePlaceholder: string
-    href?: string | ((attributes: NotebookNodeAttributes<T>) => string | undefined)
-
-    // Sizing
-    expandable?: boolean
-    startExpanded?: boolean
-    resizeable?: boolean | ((attributes: CustomNotebookNodeAttributes) => boolean)
-    heightEstimate?: number | string
-    minHeight?: number | string
-    /** If true the metadata area will only show when hovered if in editing mode */
-    autoHideMetadata?: boolean
-    /** Expand the node if the component is clicked */
-    expandOnClick?: boolean
-    settings?: NotebookNodeSettings
-}
-
-function NodeWrapper<T extends CustomNotebookNodeAttributes>(
-    props: NodeWrapperProps<T> & NotebookNodeProps<T> & Omit<NodeViewProps, 'attributes' | 'updateAttributes'>
-): JSX.Element {
+function NodeWrapper<T extends CustomNotebookNodeAttributes>(props: NodeWrapperProps<T>): JSX.Element {
     const {
-        titlePlaceholder,
         nodeType,
         Component,
         selected,
         href,
         heightEstimate = '4rem',
-        resizeable: resizeableOrGenerator = true,
-        startExpanded = false,
         expandable = true,
         expandOnClick = true,
         autoHideMetadata = false,
         minHeight,
-        node,
         getPos,
         attributes,
         updateAttributes,
-        settings = null,
+        Settings = null,
+        settingsIcon,
     } = props
 
     useWhyDidIRender('NodeWrapper.props', props)
 
     const mountedNotebookLogic = useMountedLogic(notebookLogic)
-    const { isEditable, editingNodeId } = useValues(notebookLogic)
-    const { setTextSelection } = useActions(notebookLogic)
+    const { isEditable, editingNodeId, containerSize } = useValues(mountedNotebookLogic)
+    const { unregisterNodeLogic } = useActions(notebookLogic)
+    const [slashCommandsPopoverVisible, setSlashCommandsPopoverVisible] = useState<boolean>(false)
+
+    const logicProps: NotebookNodeLogicProps = {
+        ...props,
+        notebookLogic: mountedNotebookLogic,
+    }
 
     // nodeId can start null, but should then immediately be generated
-    const nodeId = attributes.nodeId
-    const nodeLogicProps: NotebookNodeLogicProps = {
-        node,
-        nodeType,
-        attributes,
-        updateAttributes,
-        nodeId,
-        notebookLogic: mountedNotebookLogic,
-        getPos,
-        resizeable: resizeableOrGenerator,
-        settings,
-        startExpanded,
-        titlePlaceholder,
-    }
-    const nodeLogic = useMountedLogic(notebookNodeLogic(nodeLogicProps))
-    const { resizeable, expanded, actions } = useValues(nodeLogic)
-    const { setExpanded, deleteNode, toggleEditing } = useActions(nodeLogic)
+    const nodeLogic = useMountedLogic(notebookNodeLogic(logicProps))
+    const { resizeable, expanded, actions, nodeId } = useValues(nodeLogic)
+    const {
+        setRef,
+        setExpanded,
+        deleteNode,
+        toggleEditing,
+        insertOrSelectNextLine,
+        toggleEditingTitle,
+        copyToClipboard,
+        convertToBacklink,
+    } = useActions(nodeLogic)
+
+    const { ref: inViewRef, inView } = useInView({ triggerOnce: true })
+
+    const setRefs = useCallback(
+        (node) => {
+            setRef(node)
+            inViewRef(node)
+        },
+        [inViewRef]
+    )
+
+    useEffect(() => {
+        // TRICKY: child nodes mount the parent logic so we need to control the mounting / unmounting directly in this component
+        return () => unregisterNodeLogic(nodeId)
+    }, [])
 
     useWhyDidIRender('NodeWrapper.logicProps', {
         resizeable,
@@ -117,7 +111,6 @@ function NodeWrapper<T extends CustomNotebookNodeAttributes>(
         mountedNotebookLogic,
     })
 
-    const [ref, inView] = useInView({ triggerOnce: true })
     const contentRef = useRef<HTMLDivElement | null>(null)
 
     // If resizeable is true then the node attr "height" is required
@@ -142,37 +135,81 @@ function NodeWrapper<T extends CustomNotebookNodeAttributes>(
         window.addEventListener('mouseup', onResizedEnd)
     }, [resizeable, updateAttributes])
 
+    const onActionsAreaClick = (): void => {
+        // Clicking in the area of the actions without selecting a specific action likely indicates the user wants to
+        // add new content below. If we are in editing mode, we should select the next line if there is one, otherwise
+        if (!slashCommandsPopoverVisible) {
+            insertOrSelectNextLine()
+        }
+    }
+
     const parsedHref = typeof href === 'function' ? href(attributes) : href
 
     // Element is resizable if resizable is set to true. If expandable is set to true then is is only resizable if expanded is true
     const isResizeable = resizeable && (!expandable || expanded)
+    const isDraggable = !!(isEditable && getPos)
+
+    const menuItems: LemonMenuItems = [
+        {
+            label: 'Copy',
+            onClick: () => copyToClipboard(),
+            sideIcon: <IconCopy />,
+        },
+        isEditable && isResizeable
+            ? {
+                  label: 'Reset height to default',
+                  onClick: () => {
+                      updateAttributes({
+                          height: null,
+                      } as any)
+                  },
+              }
+            : null,
+        isEditable && parsedHref
+            ? {
+                  label: 'Convert to inline link',
+                  onClick: () => convertToBacklink(parsedHref),
+                  sideIcon: <IconLink />,
+              }
+            : null,
+
+        isEditable ? { label: 'Edit title', onClick: () => toggleEditingTitle(true) } : null,
+        isEditable ? { label: 'Remove', onClick: () => deleteNode(), sideIcon: <IconClose />, status: 'danger' } : null,
+    ]
+
+    const hasMenu = menuItems.some((x) => !!x)
 
     return (
         <NotebookNodeContext.Provider value={nodeLogic}>
-            <BindLogic logic={notebookNodeLogic} props={nodeLogicProps}>
+            <BindLogic logic={notebookNodeLogic} props={logicProps}>
                 <NodeViewWrapper as="div">
                     <div
-                        ref={ref}
+                        ref={setRefs}
                         className={clsx(nodeType, 'NotebookNode', {
-                            'NotebookNode--selected': isEditable && selected,
                             'NotebookNode--auto-hide-metadata': autoHideMetadata,
+                            'NotebookNode--editable': getPos && isEditable,
+                            'NotebookNode--selected': isEditable && selected,
+                            'NotebookNode--active': slashCommandsPopoverVisible,
                         })}
                     >
                         <div className="NotebookNode__box">
                             <ErrorBoundary>
                                 {!inView ? (
                                     <>
-                                        <div className="h-4" /> {/* Placeholder for the drag handle */}
+                                        <div className="h-10 p-2 flex justify-between">
+                                            <LemonSkeleton className="w-1/4" />
+                                            <LemonSkeleton className="w-20" />
+                                        </div>
                                         {/* eslint-disable-next-line react/forbid-dom-props */}
-                                        <div style={{ height: heightEstimate }}>
-                                            <LemonSkeleton className="h-full" />
+                                        <div className="flex items-center p-2" style={{ height: heightEstimate }}>
+                                            <LemonSkeleton className="w-full h-full" />
                                         </div>
                                     </>
                                 ) : (
                                     <>
                                         <div className="NotebookNode__meta" data-drag-handle>
                                             <div className="flex items-center flex-1 overflow-hidden">
-                                                {isEditable && (
+                                                {isDraggable && (
                                                     <IconDragHandle className="cursor-move text-base shrink-0" />
                                                 )}
                                                 <NotebookNodeTitle />
@@ -193,25 +230,49 @@ function NodeWrapper<T extends CustomNotebookNodeAttributes>(
 
                                                 {isEditable ? (
                                                     <>
-                                                        {settings ? (
+                                                        {Settings ? (
                                                             <LemonButton
                                                                 onClick={() => toggleEditing()}
                                                                 size="small"
-                                                                icon={<IconFilter />}
+                                                                icon={
+                                                                    typeof settingsIcon === 'string' ? (
+                                                                        settingsIcon === 'gear' ? (
+                                                                            <IconGear />
+                                                                        ) : (
+                                                                            <IconFilter />
+                                                                        )
+                                                                    ) : (
+                                                                        settingsIcon ?? <IconFilter />
+                                                                    )
+                                                                }
                                                                 active={editingNodeId === nodeId}
                                                             />
                                                         ) : null}
-
-                                                        <LemonButton
-                                                            onClick={() => deleteNode()}
-                                                            size="small"
-                                                            status="danger"
-                                                            icon={<IconClose />}
-                                                        />
                                                     </>
+                                                ) : null}
+
+                                                {hasMenu ? (
+                                                    <LemonMenu items={menuItems} placement="bottom-end">
+                                                        <LemonButton
+                                                            icon={<IconEllipsis />}
+                                                            status="stealth"
+                                                            size="small"
+                                                        />
+                                                    </LemonMenu>
                                                 ) : null}
                                             </div>
                                         </div>
+
+                                        {Settings && editingNodeId === nodeId && containerSize === 'small' ? (
+                                            <div className="NotebookNode__settings">
+                                                <Settings
+                                                    key={nodeId}
+                                                    attributes={attributes}
+                                                    updateAttributes={updateAttributes}
+                                                />
+                                            </div>
+                                        ) : null}
+
                                         <div
                                             ref={contentRef}
                                             className={clsx(
@@ -229,29 +290,48 @@ function NodeWrapper<T extends CustomNotebookNodeAttributes>(
                                 )}
                             </ErrorBoundary>
                         </div>
-                        {isEditable && actions.length ? (
-                            <div
-                                className="NotebookNode__actions"
-                                // UX improvement so that the actions don't get in the way of the cursor
-                                onClick={() => setTextSelection(getPos() + 1)}
-                            >
-                                {actions.map((x, i) => (
-                                    <LemonButton
-                                        key={i}
-                                        type="secondary"
-                                        status="primary"
-                                        size="small"
-                                        icon={x.icon ?? <IconPlusMini />}
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            x.onClick()
-                                        }}
+                        <div
+                            className="NotebookNode__gap"
+                            // UX improvement so that the actions don't get in the way of the cursor
+                            onClick={() => onActionsAreaClick()}
+                        >
+                            {getPos && isEditable ? (
+                                <>
+                                    <SlashCommandsPopover
+                                        mode="add"
+                                        getPos={() => getPos() + 1}
+                                        visible={slashCommandsPopoverVisible}
+                                        onClose={() => setSlashCommandsPopoverVisible(false)}
                                     >
-                                        {x.text}
-                                    </LemonButton>
-                                ))}
-                            </div>
-                        ) : null}
+                                        <LemonButton
+                                            size="xsmall"
+                                            type="secondary"
+                                            status="primary"
+                                            icon={<IconPlus />}
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                setSlashCommandsPopoverVisible(true)
+                                            }}
+                                        />
+                                    </SlashCommandsPopover>
+                                    {actions.map((x, i) => (
+                                        <LemonButton
+                                            key={i}
+                                            size="xsmall"
+                                            type="secondary"
+                                            status="primary"
+                                            icon={x.icon ?? <IconPlus />}
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                x.onClick()
+                                            }}
+                                        >
+                                            {x.text}
+                                        </LemonButton>
+                                    ))}
+                                </>
+                            ) : null}
+                        </div>
                     </div>
                 </NodeViewWrapper>
             </BindLogic>
@@ -259,27 +339,15 @@ function NodeWrapper<T extends CustomNotebookNodeAttributes>(
     )
 }
 
-const MemoizedNodeWrapper = memo(NodeWrapper) as typeof NodeWrapper
+export const MemoizedNodeWrapper = memo(NodeWrapper) as typeof NodeWrapper
 
-export type CreatePostHogWidgetNodeOptions<T extends CustomNotebookNodeAttributes> = NodeWrapperProps<T> & {
-    nodeType: NotebookNodeType
-    Component: (props: NotebookNodeProps<T>) => JSX.Element | null
-    pasteOptions?: {
-        find: string
-        getAttributes: (match: ExtendedRegExpMatchArray) => Promise<T | null | undefined> | T | null | undefined
-    }
-    attributes: Record<keyof T, Partial<Attribute>>
-    settings?: NotebookNodeSettings
-    serializedText?: (attributes: NotebookNodeAttributes<T>) => string
-}
+export function createPostHogWidgetNode<T extends CustomNotebookNodeAttributes>(
+    options: CreatePostHogWidgetNodeOptions<T>
+): Node {
+    const { Component, pasteOptions, attributes, serializedText, ...wrapperProps } = options
 
-export function createPostHogWidgetNode<T extends CustomNotebookNodeAttributes>({
-    Component,
-    pasteOptions,
-    attributes,
-    serializedText,
-    ...wrapperProps
-}: CreatePostHogWidgetNodeOptions<T>): Node {
+    KNOWN_NODES[wrapperProps.nodeType] = options
+
     // NOTE: We use NodeViewProps here as we convert them to NotebookNodeProps
     const WrappedComponent = (props: NodeViewProps): JSX.Element => {
         useWhyDidIRender('NodeWrapper(WrappedComponent)', props)
@@ -293,6 +361,12 @@ export function createPostHogWidgetNode<T extends CustomNotebookNodeAttributes>(
                 })
             }, 0)
         }
+
+        useEffect(() => {
+            if (props.node.attrs.nodeId === null) {
+                posthog.capture('notebook node added', { node_type: props.node.type.name })
+            }
+        }, [props.node.attrs.nodeId])
 
         const nodeProps: NotebookNodeProps<T> & Omit<NodeViewProps, 'attributes' | 'updateAttributes'> = {
             ...props,
@@ -329,6 +403,8 @@ export function createPostHogWidgetNode<T extends CustomNotebookNodeAttributes>(
                 nodeId: {
                     default: null,
                 },
+                __init: { default: null },
+                children: {},
                 ...attributes,
             }
         },
@@ -342,7 +418,20 @@ export function createPostHogWidgetNode<T extends CustomNotebookNodeAttributes>(
         },
 
         renderHTML({ HTMLAttributes }) {
-            return [wrapperProps.nodeType, mergeAttributes(HTMLAttributes)]
+            // We want to stringify all object attributes so that we can use them in the serializedText
+            const sanitizedAttributes = Object.fromEntries(
+                Object.entries(HTMLAttributes).map(([key, value]) => {
+                    if (Array.isArray(value) || typeof value === 'object') {
+                        return [key, JSON.stringify(value)]
+                    }
+                    return [key, value]
+                })
+            )
+
+            // This method is primarily used by copy and paste so we can remove the nodeID, assuming we don't want duplicates
+            delete sanitizedAttributes['nodeId']
+
+            return [wrapperProps.nodeType, mergeAttributes(sanitizedAttributes)]
         },
 
         addNodeView() {
@@ -361,4 +450,36 @@ export function createPostHogWidgetNode<T extends CustomNotebookNodeAttributes>(
                 : []
         },
     })
+}
+
+export const NotebookNodeChildRenderer = ({
+    nodeLogic,
+    content,
+}: {
+    nodeLogic: BuiltLogic<notebookNodeLogicType>
+    content: NotebookNodeResource
+}): JSX.Element => {
+    const options = KNOWN_NODES[content.type]
+
+    // eslint-disable-next-line no-console
+    console.log(nodeLogic)
+    // TODO: Respect attr changes
+
+    // TODO: Allow deletion
+
+    return (
+        <MemoizedNodeWrapper
+            {...options}
+            // parentNodeLogic={nodeLogic}
+            Component={options.Component}
+            nodeType={content.type}
+            titlePlaceholder={options.titlePlaceholder}
+            attributes={content.attrs}
+            updateAttributes={(newAttrs) => {
+                // eslint-disable-next-line no-console
+                console.log('updated called (TODO)', newAttrs)
+            }}
+            selected={false}
+        />
+    )
 }

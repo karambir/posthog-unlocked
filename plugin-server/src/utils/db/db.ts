@@ -2,7 +2,6 @@ import ClickHouse from '@posthog/clickhouse'
 import { CacheOptions, Properties } from '@posthog/plugin-scaffold'
 import { captureException } from '@sentry/node'
 import { Pool as GenericPool } from 'generic-pool'
-import { StatsD } from 'hot-shots'
 import Redis from 'ioredis'
 import { ProducerRecord } from 'kafkajs'
 import { DateTime } from 'luxon'
@@ -36,7 +35,6 @@ import {
     PluginLogEntrySource,
     PluginLogEntryType,
     PluginLogLevel,
-    PluginSourceFileStatus,
     PropertiesLastOperation,
     PropertiesLastUpdatedAt,
     PropertyDefinitionType,
@@ -67,10 +65,17 @@ import {
 } from '../utils'
 import { OrganizationPluginsAccessLevel } from './../../types'
 import { KafkaProducerWrapper } from './kafka-producer-wrapper'
+import {
+    groupDataMissingCounter,
+    groupInfoCacheResultCounter,
+    personUpdateVersionMismatchCounter,
+    pluginLogEntryCounter,
+} from './metrics'
 import { PostgresRouter, PostgresUse, TransactionClient } from './postgres'
 import {
     generateKafkaPersonUpdateMessage,
     safeClickhouseString,
+    sanitizeJsonbValue,
     shouldStoreLog,
     timeoutGuard,
     unparsePersonPartial,
@@ -152,14 +157,11 @@ export class DB {
     /** ClickHouse used for syncing Postgres and ClickHouse person data. */
     clickhouse: ClickHouse
 
-    /** StatsD instance used to do instrumentation */
-    statsd: StatsD | undefined
-
     /** How many unique group types to allow per team */
     MAX_GROUP_TYPES_PER_TEAM = 5
 
-    /** Whether to write to clickhouse_person_unique_id topic */
-    writeToPersonUniqueId?: boolean
+    /** Default log level for plugins that don't specify it */
+    pluginsDefaultLogLevel: PluginLogLevel
 
     /** How many seconds to keep person info in Redis cache */
     PERSONS_AND_GROUPS_CACHE_TTL: number
@@ -169,14 +171,14 @@ export class DB {
         redisPool: GenericPool<Redis.Redis>,
         kafkaProducer: KafkaProducerWrapper,
         clickhouse: ClickHouse,
-        statsd: StatsD | undefined,
+        pluginsDefaultLogLevel: PluginLogLevel,
         personAndGroupsCacheTtl = 1
     ) {
         this.postgres = postgres
         this.redisPool = redisPool
         this.kafkaProducer = kafkaProducer
         this.clickhouse = clickhouse
-        this.statsd = statsd
+        this.pluginsDefaultLogLevel = pluginsDefaultLogLevel
         this.PERSONS_AND_GROUPS_CACHE_TTL = personAndGroupsCacheTtl
     }
 
@@ -186,7 +188,7 @@ export class DB {
         query: string,
         options?: ClickHouse.QueryOptions
     ): Promise<ClickHouse.ObjectQueryResult<R>> {
-        return instrumentQuery(this.statsd, 'query.clickhouse', undefined, async () => {
+        return instrumentQuery('query.clickhouse', undefined, async () => {
             const timeout = timeoutGuard('ClickHouse slow query warning after 30 sec', { query })
             try {
                 const queryResult = await this.clickhouse.querying(query, options)
@@ -209,7 +211,7 @@ export class DB {
     ): Promise<T | null> {
         const { jsonSerialize = true } = options
 
-        return instrumentQuery(this.statsd, 'query.redisGet', tag, async () => {
+        return instrumentQuery('query.redisGet', tag, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('Getting redis key delayed. Waiting over 30 sec to get key.', { key })
             try {
@@ -244,7 +246,7 @@ export class DB {
     ): Promise<void> {
         const { jsonSerialize = true } = options
 
-        return instrumentQuery(this.statsd, 'query.redisSet', tag, async () => {
+        return instrumentQuery('query.redisSet', tag, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('Setting redis key delayed. Waiting over 30 sec to set key', { key })
             try {
@@ -264,7 +266,7 @@ export class DB {
     public redisSetMulti(kv: Array<[string, unknown]>, ttlSeconds?: number, options: CacheOptions = {}): Promise<void> {
         const { jsonSerialize = true } = options
 
-        return instrumentQuery(this.statsd, 'query.redisSet', undefined, async () => {
+        return instrumentQuery('query.redisSet', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('Setting redis key delayed. Waiting over 30 sec to set keys', {
                 keys: kv.map((x) => x[0]),
@@ -288,7 +290,7 @@ export class DB {
     }
 
     public redisIncr(key: string): Promise<number> {
-        return instrumentQuery(this.statsd, 'query.redisIncr', undefined, async () => {
+        return instrumentQuery('query.redisIncr', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('Incrementing redis key delayed. Waiting over 30 sec to incr key', { key })
             try {
@@ -301,7 +303,7 @@ export class DB {
     }
 
     public redisExpire(key: string, ttlSeconds: number): Promise<boolean> {
-        return instrumentQuery(this.statsd, 'query.redisExpire', undefined, async () => {
+        return instrumentQuery('query.redisExpire', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('Expiring redis key delayed. Waiting over 30 sec to expire key', { key })
             try {
@@ -316,7 +318,7 @@ export class DB {
     public redisLPush(key: string, value: unknown, options: CacheOptions = {}): Promise<number> {
         const { jsonSerialize = true } = options
 
-        return instrumentQuery(this.statsd, 'query.redisLPush', undefined, async () => {
+        return instrumentQuery('query.redisLPush', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('LPushing redis key delayed. Waiting over 30 sec to lpush key', { key })
             try {
@@ -330,7 +332,7 @@ export class DB {
     }
 
     public redisLRange(key: string, startIndex: number, endIndex: number): Promise<string[]> {
-        return instrumentQuery(this.statsd, 'query.redisLRange', undefined, async () => {
+        return instrumentQuery('query.redisLRange', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('LRANGE delayed. Waiting over 30 sec to perform LRANGE', {
                 key,
@@ -347,7 +349,7 @@ export class DB {
     }
 
     public redisLLen(key: string): Promise<number> {
-        return instrumentQuery(this.statsd, 'query.redisLLen', undefined, async () => {
+        return instrumentQuery('query.redisLLen', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('LLEN delayed. Waiting over 30 sec to perform LLEN', {
                 key,
@@ -362,7 +364,7 @@ export class DB {
     }
 
     public redisBRPop(key1: string, key2: string): Promise<[string, string]> {
-        return instrumentQuery(this.statsd, 'query.redisBRPop', undefined, async () => {
+        return instrumentQuery('query.redisBRPop', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('BRPoping redis key delayed. Waiting over 30 sec to brpop keys', {
                 key1,
@@ -378,7 +380,7 @@ export class DB {
     }
 
     public redisLRem(key: string, count: number, elementKey: string): Promise<number> {
-        return instrumentQuery(this.statsd, 'query.redisLRem', undefined, async () => {
+        return instrumentQuery('query.redisLRem', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('LREM delayed. Waiting over 30 sec to perform LREM', {
                 key,
@@ -395,7 +397,7 @@ export class DB {
     }
 
     public redisLPop(key: string, count: number): Promise<string[]> {
-        return instrumentQuery(this.statsd, 'query.redisLPop', undefined, async () => {
+        return instrumentQuery('query.redisLPop', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('LPOP delayed. Waiting over 30 sec to perform LPOP', {
                 key,
@@ -411,7 +413,7 @@ export class DB {
     }
 
     public redisPublish(channel: string, message: string): Promise<number> {
-        return instrumentQuery(this.statsd, 'query.redisPublish', undefined, async () => {
+        return instrumentQuery('query.redisPublish', undefined, async () => {
             const client = await this.redisPool.acquire()
             const timeout = timeoutGuard('Publish delayed. Waiting over 30 sec to perform Publish', {
                 channel,
@@ -494,7 +496,7 @@ export class DB {
                 )
 
                 if (cachedGroupData) {
-                    this.statsd?.increment('group_info_cache.hit')
+                    groupInfoCacheResultCounter.labels({ result: 'hit' }).inc()
                     groupPropertiesColumns[propertiesColumnName] = JSON.stringify(cachedGroupData.properties)
                     groupCreatedAtColumns[createdAtColumnName] = cachedGroupData.created_at
 
@@ -504,7 +506,7 @@ export class DB {
                 captureException(error, { tags: { team_id: teamId } })
             }
 
-            this.statsd?.increment('group_info_cache.miss')
+            groupInfoCacheResultCounter.labels({ result: 'miss' }).inc()
 
             // If we didn't find cached data, lookup the group from Postgres
             const storedGroupData = await this.fetchGroup(teamId, groupTypeIndex as GroupTypeIndex, groupKey)
@@ -531,7 +533,7 @@ export class DB {
                 }
             } else {
                 // We couldn't find the data from the cache nor Postgres, so record this in a metric and in Sentry
-                this.statsd?.increment('groups_data_missing_entirely')
+                groupDataMissingCounter.inc()
                 status.debug('🔍', `Could not find group data for group ${groupCacheKey} in cache or storage`)
 
                 groupPropertiesColumns[propertiesColumnName] = '{}'
@@ -652,43 +654,75 @@ export class DB {
         uuid: string,
         distinctIds?: string[]
     ): Promise<Person> {
+        distinctIds ||= []
+        const version = 0 // We're creating the person now!
+
+        const insertResult = await this.postgres.query(
+            PostgresUse.COMMON_WRITE,
+            `WITH inserted_person AS (
+                    INSERT INTO posthog_person (
+                        created_at, properties, properties_last_updated_at,
+                        properties_last_operation, team_id, is_user_id, is_identified, uuid, version
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    RETURNING *
+                )` +
+                distinctIds
+                    .map(
+                        // NOTE: Keep this in sync with the posthog_persondistinctid INSERT in
+                        // `addDistinctIdPooled`
+                        (_, index) => `, distinct_id_${index} AS (
+                        INSERT INTO posthog_persondistinctid (distinct_id, person_id, team_id, version)
+                        VALUES ($${10 + index}, (SELECT id FROM inserted_person), $5, $9))`
+                    )
+                    .join('') +
+                `SELECT * FROM inserted_person;`,
+            [
+                createdAt.toISO(),
+                sanitizeJsonbValue(properties),
+                sanitizeJsonbValue(propertiesLastUpdatedAt),
+                sanitizeJsonbValue(propertiesLastOperation),
+                teamId,
+                isUserId,
+                isIdentified,
+                uuid,
+                version,
+                // The copy and reverse here is to maintain compatability with pre-existing code
+                // and tests. Postgres appears to assign IDs in reverse order of the INSERTs in the
+                // CTEs above, so we need to reverse the distinctIds to match the old behavior where
+                // we would do a round trip for each INSERT. We shouldn't actually depend on the
+                // `id` column of distinct_ids, so this is just a simple way to keeps tests exactly
+                // the same and prove behavior is the same as before.
+                ...distinctIds.slice().reverse(),
+            ],
+            'insertPerson'
+        )
+        const personCreated = insertResult.rows[0] as RawPerson
+        const person = {
+            ...personCreated,
+            created_at: DateTime.fromISO(personCreated.created_at).toUTC(),
+            version,
+        } as Person
+
         const kafkaMessages: ProducerRecord[] = []
+        kafkaMessages.push(generateKafkaPersonUpdateMessage(createdAt, properties, teamId, isIdentified, uuid, version))
 
-        const person = await this.postgres.transaction(PostgresUse.COMMON_WRITE, 'createPerson', async (tx) => {
-            const insertResult = await this.postgres.query(
-                tx,
-                'INSERT INTO posthog_person (created_at, properties, properties_last_updated_at, properties_last_operation, team_id, is_user_id, is_identified, uuid, version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
-                [
-                    createdAt.toISO(),
-                    JSON.stringify(properties),
-                    JSON.stringify(propertiesLastUpdatedAt),
-                    JSON.stringify(propertiesLastOperation),
-                    teamId,
-                    isUserId,
-                    isIdentified,
-                    uuid,
-                    0,
+        for (const distinctId of distinctIds) {
+            kafkaMessages.push({
+                topic: KAFKA_PERSON_DISTINCT_ID,
+                messages: [
+                    {
+                        value: JSON.stringify({
+                            person_id: person.uuid,
+                            team_id: teamId,
+                            distinct_id: distinctId,
+                            version,
+                            is_deleted: 0,
+                        }),
+                    },
                 ],
-                'insertPerson'
-            )
-            const personCreated = insertResult.rows[0] as RawPerson
-            const person = {
-                ...personCreated,
-                created_at: DateTime.fromISO(personCreated.created_at).toUTC(),
-                version: Number(personCreated.version || 0),
-            } as Person
-
-            kafkaMessages.push(
-                generateKafkaPersonUpdateMessage(createdAt, properties, teamId, isIdentified, uuid, person.version)
-            )
-
-            for (const distinctId of distinctIds || []) {
-                const messages = await this.addDistinctIdPooled(person, distinctId, tx)
-                kafkaMessages.push(...messages)
-            }
-
-            return person
-        })
+            })
+        }
 
         await this.kafkaProducer.queueMessages(kafkaMessages)
         return person
@@ -707,7 +741,7 @@ export class DB {
             return [person, []]
         }
 
-        const values = [...updateValues, person.id]
+        const values = [...updateValues, person.id].map(sanitizeJsonbValue)
 
         // Potentially overriding values badly if there was an update to the person after computing updateValues above
         const queryString = `UPDATE posthog_person SET version = COALESCE(version, 0)::numeric + 1, ${Object.keys(
@@ -739,7 +773,7 @@ export class DB {
         // Without races, the returned person (updatedPerson) should have a version that's only +1 the person in memory
         const versionDisparity = updatedPerson.version - person.version - 1
         if (versionDisparity > 0) {
-            this.statsd?.increment('person_update_version_mismatch', { versionDisparity: String(versionDisparity) })
+            personUpdateVersionMismatchCounter.inc()
         }
 
         const kafkaMessages = []
@@ -839,6 +873,7 @@ export class DB {
     ): Promise<ProducerRecord[]> {
         const insertResult = await this.postgres.query(
             tx ?? PostgresUse.COMMON_WRITE,
+            // NOTE: Keep this in sync with the posthog_persondistinctid INSERT in `createPerson`
             'INSERT INTO posthog_persondistinctid (distinct_id, person_id, team_id, version) VALUES ($1, $2, $3, 0) RETURNING *',
             [distinctId, person.id, person.team_id],
             'addDistinctIdPooled'
@@ -965,36 +1000,43 @@ export class DB {
         return insertResult.rows[0]
     }
 
-    // Feature Flag Hash Key overrides
-    public async addFeatureFlagHashKeysForMergedPerson(
+    public async updateCohortsAndFeatureFlagsForMerge(
         teamID: Team['id'],
         sourcePersonID: Person['id'],
         targetPersonID: Person['id'],
         tx?: TransactionClient
     ): Promise<void> {
-        // Delete and insert in a single query to ensure
-        // this function is safe wherever it is run.
-        // The CTE helps make this happen.
-        //
-        // Every override is unique for a team-personID-featureFlag combo.
-        // In case we run into a conflict we would ideally use the override from most recent
-        // personId used, so the user experience is consistent, however that's tricky to figure out
-        // this also happens rarely, so we're just going to do the performance optimal thing
-        // i.e. do nothing on conflicts, so we keep using the value that the person merged into had
+        // When personIDs change, update places depending on a person_id foreign key
+
         await this.postgres.query(
             tx ?? PostgresUse.COMMON_WRITE,
-            `
-            WITH deletions AS (
-                DELETE FROM posthog_featureflaghashkeyoverride WHERE team_id = $1 AND person_id = $2
+            // Do two high level things in a single round-trip to the DB.
+            //
+            // 1. Update cohorts.
+            // 2. Update (delete+insert) feature flags.
+            //
+            // NOTE: Every override is unique for a team-personID-featureFlag combo. In case we run
+            // into a conflict we would ideally use the override from most recent personId used, so
+            // the user experience is consistent, however that's tricky to figure out this also
+            // happens rarely, so we're just going to do the performance optimal thing i.e. do
+            // nothing on conflicts, so we keep using the value that the person merged into had
+            `WITH cohort_update AS (
+                UPDATE posthog_cohortpeople
+                SET person_id = $1
+                WHERE person_id = $2
+                RETURNING person_id
+            ),
+            deletions AS (
+                DELETE FROM posthog_featureflaghashkeyoverride
+                WHERE team_id = $3 AND person_id = $2
                 RETURNING team_id, person_id, feature_flag_key, hash_key
             )
             INSERT INTO posthog_featureflaghashkeyoverride (team_id, person_id, feature_flag_key, hash_key)
-                SELECT team_id, $3, feature_flag_key, hash_key
+                SELECT team_id, $1, feature_flag_key, hash_key
                 FROM deletions
-                ON CONFLICT DO NOTHING
-            `,
-            [teamID, sourcePersonID, targetPersonID],
-            'addFeatureFlagHashKeysForMergedPerson'
+                ON CONFLICT DO NOTHING`,
+            [targetPersonID, sourcePersonID, teamID],
+            'updateCohortAndFeatureFlagsPeople'
         )
     }
 
@@ -1036,10 +1078,9 @@ export class DB {
 
     public async queuePluginLogEntry(entry: LogEntryPayload): Promise<void> {
         const { pluginConfig, source, message, type, timestamp, instanceId } = entry
+        const configuredLogLevel = pluginConfig.plugin?.log_level || this.pluginsDefaultLogLevel
 
-        const logLevel = pluginConfig.plugin?.log_level
-
-        if (!shouldStoreLog(logLevel || PluginLogLevel.Full, source, type)) {
+        if (!shouldStoreLog(configuredLogLevel, type)) {
             return
         }
 
@@ -1058,24 +1099,10 @@ export class DB {
         if (parsedEntry.message.length > 50_000) {
             const { message, ...rest } = parsedEntry
             status.warn('⚠️', 'Plugin log entry too long, ignoring.', rest)
-            this.statsd?.increment('logs.entries_too_large', {
-                source,
-                team_id: pluginConfig.team_id.toString(),
-                plugin_id: pluginConfig.plugin_id.toString(),
-            })
             return
         }
 
-        this.statsd?.increment(`logs.entries_created`, {
-            source,
-            team_id: pluginConfig.team_id.toString(),
-            plugin_id: pluginConfig.plugin_id.toString(),
-        })
-        this.statsd?.increment('logs.entries_size', {
-            source,
-            team_id: pluginConfig.team_id.toString(),
-            plugin_id: pluginConfig.plugin_id.toString(),
-        })
+        pluginLogEntryCounter.labels({ plugin_id: String(pluginConfig.plugin_id), source }).inc()
 
         try {
             await this.kafkaProducer.queueSingleJsonMessage(
@@ -1490,39 +1517,5 @@ export class DB {
             'getPluginSource'
         )
         return rows[0]?.source ?? null
-    }
-
-    public async setPluginTranspiled(pluginId: Plugin['id'], filename: string, transpiled: string): Promise<void> {
-        await this.postgres.query(
-            PostgresUse.COMMON_WRITE,
-            `INSERT INTO posthog_pluginsourcefile (id, plugin_id, filename, status, transpiled, updated_at) VALUES($1, $2, $3, $4, $5, NOW())
-                ON CONFLICT ON CONSTRAINT unique_filename_for_plugin
-                DO UPDATE SET status = $4, transpiled = $5, error = NULL, updated_at = NOW()`,
-            [new UUIDT().toString(), pluginId, filename, PluginSourceFileStatus.Transpiled, transpiled],
-            'setPluginTranspiled'
-        )
-    }
-
-    public async setPluginTranspiledError(pluginId: Plugin['id'], filename: string, error: string): Promise<void> {
-        await this.postgres.query(
-            PostgresUse.COMMON_WRITE,
-            `INSERT INTO posthog_pluginsourcefile (id, plugin_id, filename, status, error, updated_at) VALUES($1, $2, $3, $4, $5, NOW())
-                ON CONFLICT ON CONSTRAINT unique_filename_for_plugin
-                DO UPDATE SET status = $4, error = $5, transpiled = NULL, updated_at = NOW()`,
-            [new UUIDT().toString(), pluginId, filename, PluginSourceFileStatus.Error, error],
-            'setPluginTranspiledError'
-        )
-    }
-
-    public async getPluginTranspilationLock(pluginId: Plugin['id'], filename: string): Promise<boolean> {
-        const response = await this.postgres.query(
-            PostgresUse.COMMON_WRITE,
-            `INSERT INTO posthog_pluginsourcefile (id, plugin_id, filename, status, transpiled, updated_at) VALUES($1, $2, $3, $4, NULL, NOW())
-                ON CONFLICT ON CONSTRAINT unique_filename_for_plugin
-                DO UPDATE SET status = $4, updated_at = NOW() WHERE (posthog_pluginsourcefile.status IS NULL OR posthog_pluginsourcefile.status = $5) RETURNING status`,
-            [new UUIDT().toString(), pluginId, filename, PluginSourceFileStatus.Locked, ''],
-            'getPluginTranspilationLock'
-        )
-        return response.rowCount > 0
     }
 }

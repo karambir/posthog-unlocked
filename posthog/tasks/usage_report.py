@@ -16,7 +16,6 @@ from typing import (
 )
 
 import requests
-from retry import retry
 import structlog
 from dateutil import parser
 from django.conf import settings
@@ -24,6 +23,7 @@ from django.db import connection
 from django.db.models import Count, Q
 from posthoganalytics.client import Client
 from psycopg2 import sql
+from retry import retry
 from sentry_sdk import capture_exception
 
 from posthog import version_requirement
@@ -41,7 +41,13 @@ from posthog.models.plugin import PluginConfig
 from posthog.models.team.team import Team
 from posthog.models.utils import namedtuplefetchall
 from posthog.settings import CLICKHOUSE_CLUSTER, INSTANCE_TAG
-from posthog.utils import get_helm_info_env, get_instance_realm, get_instance_region, get_machine_id, get_previous_day
+from posthog.utils import (
+    get_helm_info_env,
+    get_instance_realm,
+    get_instance_region,
+    get_machine_id,
+    get_previous_day,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -104,6 +110,8 @@ class UsageReportCounters:
     # Surveys
     survey_responses_count_in_period: int
     survey_responses_count_in_month: int
+    # Data Warehouse
+    rows_synced_in_period: int
 
 
 # Instance metadata to be included in oveall report
@@ -174,7 +182,10 @@ def get_instance_metadata(period: Tuple[datetime, datetime]) -> InstanceMetadata
     metadata = InstanceMetadata(
         deployment_infrastructure=os.getenv("DEPLOYMENT", "unknown"),
         realm=realm,
-        period={"start_inclusive": period_start.isoformat(), "end_inclusive": period_end.isoformat()},
+        period={
+            "start_inclusive": period_start.isoformat(),
+            "end_inclusive": period_end.isoformat(),
+        },
         site_url=settings.SITE_URL,
         product=get_product_name(realm, has_license),
         # Non-cloud vars
@@ -197,7 +208,12 @@ def get_instance_metadata(period: Tuple[datetime, datetime]) -> InstanceMetadata
         metadata.users_who_logged_in = [
             {"id": user.id, "distinct_id": user.distinct_id}
             if user.anonymize_data
-            else {"id": user.id, "distinct_id": user.distinct_id, "first_name": user.first_name, "email": user.email}
+            else {
+                "id": user.id,
+                "distinct_id": user.distinct_id,
+                "first_name": user.first_name,
+                "email": user.email,
+            }
             for user in User.objects.filter(is_active=True, last_login__gte=period_start, last_login__lte=period_end)
         ]
         metadata.users_who_logged_in_count = len(metadata.users_who_logged_in)
@@ -205,8 +221,17 @@ def get_instance_metadata(period: Tuple[datetime, datetime]) -> InstanceMetadata
         metadata.users_who_signed_up = [
             {"id": user.id, "distinct_id": user.distinct_id}
             if user.anonymize_data
-            else {"id": user.id, "distinct_id": user.distinct_id, "first_name": user.first_name, "email": user.email}
-            for user in User.objects.filter(is_active=True, date_joined__gte=period_start, date_joined__lte=period_end)
+            else {
+                "id": user.id,
+                "distinct_id": user.distinct_id,
+                "first_name": user.first_name,
+                "email": user.email,
+            }
+            for user in User.objects.filter(
+                is_active=True,
+                date_joined__gte=period_start,
+                date_joined__lte=period_end,
+            )
         ]
         metadata.users_who_signed_up_count = len(metadata.users_who_signed_up)
 
@@ -243,7 +268,8 @@ def get_org_owner_or_first_user(organization_id: str) -> Optional[User]:
         user = membership.user
     else:
         capture_exception(
-            Exception("No user found for org while generating report"), {"org": {"organization_id": organization_id}}
+            Exception("No user found for org while generating report"),
+            {"org": {"organization_id": organization_id}},
         )
     return user
 
@@ -288,7 +314,12 @@ def send_report_to_billing_service(org_id: str, report: Dict[str, Any]) -> None:
         logger.error(f"UsageReport failed sending to Billing for organization: {organization.id}: {err}")
         capture_exception(err)
         pha_client = Client("sTMFPsFhdP1Ssg")
-        capture_event(pha_client, f"organization usage report to billing service failure", org_id, {"err": str(err)})
+        capture_event(
+            pha_client,
+            f"organization usage report to billing service failure",
+            org_id,
+            {"err": str(err)},
+        )
         raise err
 
 
@@ -362,7 +393,7 @@ def get_teams_with_billable_event_count_in_period(
         f"""
         SELECT team_id, count({distinct_expression}) as count
         FROM events
-        WHERE timestamp between %(begin)s AND %(end)s AND event != '$feature_flag_called'
+        WHERE timestamp between %(begin)s AND %(end)s AND event != '$feature_flag_called' AND event NOT IN ('survey sent', 'survey shown', 'survey dismissed')
         GROUP BY team_id
     """,
         {"begin": begin, "end": end},
@@ -496,7 +527,12 @@ def get_teams_with_hogql_metric(
           AND access_method = %(access_method)s
         GROUP BY team_id
     """,
-        {"begin": begin, "end": end, "query_types": query_types, "access_method": access_method},
+        {
+            "begin": begin,
+            "end": end,
+            "query_types": query_types,
+            "access_method": access_method,
+        },
         workload=Workload.OFFLINE,
         settings=CH_BILLING_SETTINGS,
     )
@@ -557,9 +593,40 @@ def get_teams_with_survey_responses_count_in_period(
     return results
 
 
+@timed_log()
+@retry(tries=QUERY_RETRIES, delay=QUERY_RETRY_DELAY, backoff=QUERY_RETRY_BACKOFF)
+def get_teams_with_rows_synced_in_period(begin: datetime, end: datetime) -> List[Tuple[int, int]]:
+    team_to_query = 1 if get_instance_region() == "EU" else 2
+
+    # dedup by job id incase there were duplicates sent
+    results = sync_execute(
+        """
+        SELECT team, sum(rows_synced) FROM (
+            SELECT JSONExtractString(properties, 'job_id') AS job_id, distinct_id AS team, any(JSONExtractInt(properties, 'count')) AS rows_synced
+            FROM events
+            WHERE team_id = %(team_to_query)s AND event = 'external data sync job' AND parseDateTimeBestEffort(JSONExtractString(properties, 'startTime')) BETWEEN %(begin)s AND %(end)s
+            GROUP BY job_id, team
+        )
+        GROUP BY team
+        """,
+        {
+            "begin": begin,
+            "end": end,
+            "team_to_query": team_to_query,
+        },
+        workload=Workload.OFFLINE,
+        settings=CH_BILLING_SETTINGS,
+    )
+
+    return results
+
+
 @app.task(ignore_result=True, max_retries=0)
 def capture_report(
-    capture_event_name: str, org_id: str, full_report_dict: Dict[str, Any], at_date: Optional[datetime] = None
+    capture_event_name: str,
+    org_id: str,
+    full_report_dict: Dict[str, Any],
+    at_date: Optional[datetime] = None,
 ) -> None:
     pha_client = Client("sTMFPsFhdP1Ssg")
     try:
@@ -747,6 +814,7 @@ def _get_all_usage_data(period_start: datetime, period_end: datetime) -> Dict[st
         teams_with_survey_responses_count_in_month=get_teams_with_survey_responses_count_in_period(
             period_start.replace(day=1), period_end
         ),
+        teams_with_rows_synced_in_period=get_teams_with_rows_synced_in_period(period_start, period_end),
     )
 
 
@@ -764,9 +832,9 @@ def _get_all_usage_data_as_team_rows(period_start: datetime, period_end: datetim
 
 def _get_teams_for_usage_reports() -> Sequence[Team]:
     return list(
-        Team.objects.select_related("organization").exclude(
-            Q(organization__for_internal_metrics=True) | Q(is_demo=True)
-        )
+        Team.objects.select_related("organization")
+        .exclude(Q(organization__for_internal_metrics=True) | Q(is_demo=True))
+        .only("id", "organization__id", "organization__name", "organization__created_at")
     )
 
 
@@ -817,11 +885,15 @@ def _get_team_report(all_data: Dict[str, Any], team: Team) -> UsageReportCounter
         event_explorer_api_duration_ms=all_data["teams_with_event_explorer_api_duration_ms"].get(team.id, 0),
         survey_responses_count_in_period=all_data["teams_with_survey_responses_count_in_period"].get(team.id, 0),
         survey_responses_count_in_month=all_data["teams_with_survey_responses_count_in_month"].get(team.id, 0),
+        rows_synced_in_period=all_data["teams_with_rows_synced_in_period"].get(team.id, 0),
     )
 
 
 def _add_team_report_to_org_reports(
-    org_reports: Dict[str, OrgReport], team: Team, team_report: UsageReportCounters, period_start: datetime
+    org_reports: Dict[str, OrgReport],
+    team: Team,
+    team_report: UsageReportCounters,
+    period_start: datetime,
 ) -> None:
     org_id = str(team.organization.id)
     if org_id not in org_reports:

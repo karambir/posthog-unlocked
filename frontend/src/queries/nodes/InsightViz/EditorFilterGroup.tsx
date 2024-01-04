@@ -1,13 +1,14 @@
-import { useState } from 'react'
-import type { InsightLogicProps, InsightModel, InsightEditorFilterGroup } from '~/types'
-import { LemonButton } from 'lib/lemon-ui/LemonButton'
-import { IconUnfoldLess, IconUnfoldMore } from 'lib/lemon-ui/icons'
-import { slugify } from 'lib/utils'
-import { LemonBadge } from 'lib/lemon-ui/LemonBadge/LemonBadge'
-import { PureField } from 'lib/forms/Field'
-import { InsightQueryNode } from '~/queries/schema'
-
 import './EditorFilterGroup.scss'
+
+import { PureField } from 'lib/forms/Field'
+import { IconUnfoldLess, IconUnfoldMore } from 'lib/lemon-ui/icons'
+import { LemonBadge } from 'lib/lemon-ui/LemonBadge/LemonBadge'
+import { LemonButton } from 'lib/lemon-ui/LemonButton'
+import { slugify } from 'lib/utils'
+import { Fragment, useState } from 'react'
+
+import { InsightQueryNode } from '~/queries/schema'
+import type { InsightEditorFilterGroup, InsightLogicProps, InsightModel } from '~/types'
 
 export interface EditorFilterGroupProps {
     editorFilterGroup: InsightEditorFilterGroup
@@ -16,7 +17,7 @@ export interface EditorFilterGroupProps {
     query: InsightQueryNode
 }
 
-export function EditorFilterGroup({ query, insightProps, editorFilterGroup }: EditorFilterGroupProps): JSX.Element {
+export function EditorFilterGroup({ insightProps, editorFilterGroup }: EditorFilterGroupProps): JSX.Element {
     const { title, count, defaultExpanded = true, editorFilters } = editorFilterGroup
     const [isRowExpanded, setIsRowExpanded] = useState(defaultExpanded)
 
@@ -48,21 +49,15 @@ export function EditorFilterGroup({ query, insightProps, editorFilterGroup }: Ed
                             )
                         }
                         return (
-                            <div key={key}>
+                            <Fragment key={key}>
                                 <PureField
-                                    label={
-                                        typeof Label === 'function' ? (
-                                            <Label query={query} insightProps={insightProps} />
-                                        ) : (
-                                            Label
-                                        )
-                                    }
+                                    label={typeof Label === 'function' ? <Label insightProps={insightProps} /> : Label}
                                     info={tooltip}
                                     showOptional={showOptional}
                                 >
-                                    {Component ? <Component query={query} insightProps={insightProps} /> : null}
+                                    {Component ? <Component insightProps={insightProps} /> : null}
                                 </PureField>
-                            </div>
+                            </Fragment>
                         )
                     })}
                 </div>

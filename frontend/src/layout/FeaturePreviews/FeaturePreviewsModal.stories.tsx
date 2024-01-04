@@ -1,9 +1,11 @@
 import { Meta, StoryFn, StoryObj } from '@storybook/react'
-import { FeaturePreviewsModal as FeaturePreviewsModalComponent } from './FeaturePreviewsModal'
-import { useFeatureFlags, useStorybookMocks } from '~/mocks/browser'
-import { EarlyAccessFeature } from 'posthog-js'
-import { CONSTRAINED_PREVIEWS } from './featurePreviewsLogic'
 import { FeatureFlagKey } from 'lib/constants'
+import { EarlyAccessFeature } from 'posthog-js'
+
+import { setFeatureFlags, useStorybookMocks } from '~/mocks/browser'
+
+import { CONSTRAINED_PREVIEWS } from './featurePreviewsLogic'
+import { FeaturePreviewsModal as FeaturePreviewsModalComponent } from './FeaturePreviewsModal'
 
 interface StoryProps {
     earlyAccessFeatures: EarlyAccessFeature[]
@@ -28,7 +30,7 @@ const Template: StoryFn<StoryProps> = ({ earlyAccessFeatures, enabledFeatureFlag
             'https://app.posthog.com/api/early_access_features/': { earlyAccessFeatures },
         },
     })
-    useFeatureFlags(enabledFeatureFlags)
+    setFeatureFlags(enabledFeatureFlags)
 
     return (
         <div className="bg-default p-2">

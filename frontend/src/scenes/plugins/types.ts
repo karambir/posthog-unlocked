@@ -28,15 +28,9 @@ export interface PluginUpdateStatusType {
     updated?: boolean
 }
 
-export enum PluginInstallationType {
-    Local = 'local',
-    Custom = 'custom',
-    Repository = 'repository',
-    Source = 'source',
-}
-
 export enum PluginTab {
     Apps = 'apps',
+    AppsManagement = 'apps_management',
     BatchExports = 'batch_exports',
     History = 'history',
 }

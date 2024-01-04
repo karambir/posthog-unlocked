@@ -1,20 +1,21 @@
+from typing import Any, List
+
 from django.conf import settings
-from posthog.permissions import OrganizationMemberPermissions
+from rest_framework import exceptions, filters, serializers, viewsets
 from rest_framework.exceptions import NotAuthenticated
 from rest_framework.permissions import IsAuthenticated
-from rest_framework import filters, serializers, viewsets, exceptions
-from posthog.warehouse.models import DataWarehouseSavedQuery
-from posthog.api.shared import UserBasicSerializer
+
 from posthog.api.routing import StructuredViewSetMixin
-from posthog.hogql.database.database import serialize_fields, SerializedField
+from posthog.api.shared import UserBasicSerializer
 from posthog.hogql.context import HogQLContext
+from posthog.hogql.database.database import SerializedField, serialize_fields
+from posthog.hogql.errors import HogQLException
+from posthog.hogql.metadata import is_valid_view
 from posthog.hogql.parser import parse_select
 from posthog.hogql.printer import print_ast
-from posthog.hogql.metadata import is_valid_view
-from posthog.hogql.errors import HogQLException
-
 from posthog.models import User
-from typing import Any, List
+from posthog.permissions import OrganizationMemberPermissions
+from posthog.warehouse.models import DataWarehouseSavedQuery
 
 
 class DataWarehouseSavedQuerySerializer(serializers.ModelSerializer):
@@ -23,7 +24,15 @@ class DataWarehouseSavedQuerySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DataWarehouseSavedQuery
-        fields = ["id", "deleted", "name", "query", "created_by", "created_at", "columns"]
+        fields = [
+            "id",
+            "deleted",
+            "name",
+            "query",
+            "created_by",
+            "created_at",
+            "columns",
+        ]
         read_only_fields = ["id", "created_by", "created_at", "columns"]
 
     def get_columns(self, view: DataWarehouseSavedQuery) -> List[SerializedField]:
@@ -65,7 +74,13 @@ class DataWarehouseSavedQuerySerializer(serializers.ModelSerializer):
         if not _is_valid_view:
             raise exceptions.ValidationError(detail="Ensure all fields are aliased")
         try:
-            print_ast(node=select_ast, context=context, dialect="clickhouse", stack=None, settings=None)
+            print_ast(
+                node=select_ast,
+                context=context,
+                dialect="clickhouse",
+                stack=None,
+                settings=None,
+            )
         except Exception as err:
             if isinstance(err, ValueError) or isinstance(err, HogQLException):
                 error = str(err)

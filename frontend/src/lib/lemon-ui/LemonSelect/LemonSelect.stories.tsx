@@ -1,6 +1,7 @@
 import { Meta, StoryFn, StoryObj } from '@storybook/react'
-import { LemonSelect, LemonSelectOptions, LemonSelectProps } from './LemonSelect'
 import { capitalizeFirstLetter } from 'lib/utils'
+
+import { LemonSelect, LemonSelectOptions, LemonSelectProps } from './LemonSelect'
 
 type Story = StoryObj<typeof LemonSelect>
 const meta: Meta<typeof LemonSelect> = {
@@ -20,7 +21,7 @@ export default meta
 const Template: StoryFn<typeof LemonSelect> = (props: LemonSelectProps<any>) => {
     return (
         <div className="flex flex-row items-center w-full border p-4 gap-2">
-            {(['small', undefined] as const).map((size, index) => (
+            {(['small', 'medium', 'large', undefined] as const).map((size, index) => (
                 <div className="flex flex-col" key={index}>
                     <h5>size={capitalizeFirstLetter(size || 'unspecified')}</h5>
                     <LemonSelect {...props} size={size} />
@@ -62,7 +63,7 @@ SectionedOptions.args = {
             options: [{ value: 'tomato', label: 'Tomato??', disabled: true }],
             footer: (
                 <div className="bg-side rounded p-2">
-                    <p className="text-muted" style={{ maxWidth: '15rem' }}>
+                    <p className="text-muted max-w-60">
                         I am a custom footer! <br />
                         This might be a good time to tell you about our premium features...
                     </p>

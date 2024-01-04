@@ -18,7 +18,10 @@ from rest_framework import status
 
 from posthog.models.feature_flag.feature_flag import FeatureFlag
 from posthog.models.team.team import Team
-from posthog.permissions import ProjectMembershipNecessaryPermissions, TeamMemberAccessPermission
+from posthog.permissions import (
+    ProjectMembershipNecessaryPermissions,
+    TeamMemberAccessPermission,
+)
 from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
 
@@ -89,6 +92,23 @@ class SurveySerializerCreateUpdateOnly(SurveySerializer):
         ]
         read_only_fields = ["id", "linked_flag", "targeting_flag", "created_at"]
 
+    def validate_appearance(self, value):
+        if value is None:
+            return value
+
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Appearance must be an object")
+
+        thank_you_message = value.get("thankYouMessageHeader")
+        if thank_you_message and nh3.is_html(thank_you_message):
+            value["thankYouMessageHeader"] = nh3_clean_with_allow_list(thank_you_message)
+
+        thank_you_description = value.get("thankYouMessageDescription")
+        if thank_you_description and nh3.is_html(thank_you_description):
+            value["thankYouMessageDescription"] = nh3_clean_with_allow_list(thank_you_description)
+
+        return value
+
     def validate_questions(self, value):
         if value is None:
             return value
@@ -111,9 +131,13 @@ class SurveySerializerCreateUpdateOnly(SurveySerializer):
 
             description = raw_question.get("description")
             if nh3.is_html(question_text):
-                cleaned_question["question"] = nh3.clean(question_text)
+                cleaned_question["question"] = nh3_clean_with_allow_list(question_text)
             if description and nh3.is_html(description):
-                cleaned_question["description"] = nh3.clean(description)
+                cleaned_question["description"] = nh3_clean_with_allow_list(description)
+
+            choices = raw_question.get("choices")
+            if choices and not isinstance(choices, list):
+                raise serializers.ValidationError("Question choices must be a list of strings")
 
             cleaned_questions.append(cleaned_question)
 
@@ -201,19 +225,29 @@ class SurveySerializerCreateUpdateOnly(SurveySerializer):
                 existing_flag_serializer.is_valid(raise_exception=True)
                 existing_flag_serializer.save()
             else:
-                new_flag = self._create_new_targeting_flag(instance.name, new_filters)
+                new_flag = self._create_new_targeting_flag(instance.name, new_filters, bool(instance.start_date))
                 validated_data["targeting_flag_id"] = new_flag.id
             validated_data.pop("targeting_flag_filters")
 
+        end_date = validated_data.get("end_date")
+        if instance.targeting_flag:
+            # turn off feature flag if survey is ended
+            if end_date is None:
+                instance.targeting_flag.active = True
+            else:
+                instance.targeting_flag.active = False
+            instance.targeting_flag.save()
+
         return super().update(instance, validated_data)
 
-    def _create_new_targeting_flag(self, name, filters):
+    def _create_new_targeting_flag(self, name, filters, active=False):
         feature_flag_key = slugify(f"{SURVEY_TARGETING_FLAG_PREFIX}{name}")
         feature_flag_serializer = FeatureFlagSerializer(
             data={
                 "key": feature_flag_key,
                 "name": f"Targeting flag for survey {name}",
                 "filters": filters,
+                "active": active,
             },
             context=self.context,
         )
@@ -325,3 +359,150 @@ def surveys(request: Request):
     ).data
 
     return cors_response(request, JsonResponse({"surveys": surveys}))
+
+
+def nh3_clean_with_allow_list(to_clean: str):
+    return nh3.clean(
+        to_clean,
+        link_rel="noopener",
+        tags={
+            "a",
+            "abbr",
+            "acronym",
+            "area",
+            "article",
+            "aside",
+            "b",
+            "bdi",
+            "bdo",
+            "blockquote",
+            "br",
+            "caption",
+            "center",
+            "cite",
+            "code",
+            "col",
+            "colgroup",
+            "data",
+            "dd",
+            "del",
+            "details",
+            "dfn",
+            "div",
+            "dl",
+            "dt",
+            "em",
+            "figcaption",
+            "figure",
+            "footer",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "header",
+            "hgroup",
+            "hr",
+            "i",
+            "img",
+            "ins",
+            "kbd",
+            "li",
+            "map",
+            "mark",
+            "nav",
+            "ol",
+            "p",
+            "pre",
+            "q",
+            "rp",
+            "rt",
+            "rtc",
+            "ruby",
+            "s",
+            "samp",
+            "small",
+            "span",
+            "strike",
+            "strong",
+            "sub",
+            "summary",
+            "sup",
+            "table",
+            "tbody",
+            "td",
+            "th",
+            "thead",
+            "time",
+            "tr",
+            "tt",
+            "u",
+            "ul",
+            "var",
+            "wbr",
+        },
+        attributes={
+            "*": {"style", "lang", "title", "width", "height"},
+            # below are mostly defaults to ammonia, but we need to add them explicitly
+            # because this python binding doesn't allow additive allowing
+            "a": {"href", "hreflang", "target"},
+            "bdo": {"dir"},
+            "blockquote": {"cite"},
+            "col": {"align", "char", "charoff", "span"},
+            "colgroup": {"align", "char", "charoff", "span"},
+            "del": {"cite", "datetime"},
+            "hr": {"align", "size", "width"},
+            "img": {"align", "alt", "height", "src", "width"},
+            "ins": {"cite", "datetime"},
+            "ol": {"start", "type"},
+            "q": {"cite"},
+            "table": {
+                "align",
+                "bgcolor",
+                "border",
+                "cellpadding",
+                "cellspacing",
+                "frame",
+                "rules",
+                "summary",
+                "width",
+            },
+            "tbody": {"align", "char", "charoff", "valign"},
+            "td": {
+                "abbr",
+                "align",
+                "axis",
+                "bgcolor",
+                "char",
+                "charoff",
+                "colspan",
+                "headers",
+                "height",
+                "nowrap",
+                "rowspan",
+                "scope",
+                "valign",
+                "width",
+            },
+            "tfoot": {"align", "char", "charoff", "valign"},
+            "th": {
+                "abbr",
+                "align",
+                "axis",
+                "bgcolor",
+                "char",
+                "charoff",
+                "colspan",
+                "headers",
+                "height",
+                "nowrap",
+                "rowspan",
+                "scope",
+                "valign",
+                "width",
+            },
+            "thead": {"align", "char", "charoff", "valign"},
+            "tr": {"align", "bgcolor", "char", "charoff", "valign"},
+        },
+    )
